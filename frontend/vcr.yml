@@ -1,0 +1,17 @@
+project:
+  name: epic-call-app-frontend
+instance:
+  name: dev
+  runtime: nodejs22
+  region: aws.use1
+  build-script: "./vcrBuild.sh"
+  entrypoint:
+    - node
+    - index.js
+  application-id: ce738a6f-9fb7-464e-ad3f-1652a299e0d2
+debug:
+  application-id: ce738a6f-9fb7-464e-ad3f-1652a299e0d2
+  entrypoint:
+    - node
+    - --inspect
+    - index.js
