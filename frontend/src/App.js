@@ -182,7 +182,9 @@ function App() {
           <Button
             variant="contained"
             onClick={handleGetOrCreateApp}
-            disabled={!apiKey || !apiSecret || appLoading}
+            disabled={
+              !apiKey || !apiSecret || appLoading || lvns.length === 0 // <-- Only enable if LVNs are loaded
+            }
           >
             {appLoading
               ? "Creating App..."
