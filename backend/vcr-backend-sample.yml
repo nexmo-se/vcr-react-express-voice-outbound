@@ -1,0 +1,17 @@
+project:
+  name: epic-call-app-backend
+instance:
+  name: dev
+  runtime: nodejs22
+  region: aws.use1
+  application-id: XXXX
+  entrypoint:
+    - node
+    - index.js
+debug:
+  name: debug
+  application-id: XXXX
+  entrypoint:
+    - nodemon
+    - --inspect
+    - index.js
