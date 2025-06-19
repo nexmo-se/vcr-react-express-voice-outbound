@@ -1,3 +1,6 @@
+# VCR configuration file
+vcr.yaml
+
 # Logs
 logs
 *.log
