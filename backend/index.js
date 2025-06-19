@@ -4,8 +4,20 @@ import { Auth } from "@vonage/auth";
 import express from "express";
 import axios from "axios";
 import path from "path";
+import cors from "cors";
 
 const app = express();
+
+const frontendUrl = process.env.FRONTEND_URL || "*"; // fallback for local/dev
+
+app.use(
+  cors({
+    origin: frontendUrl,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
+
 const port = process.env.VCR_PORT;
 
 // VCR Providers

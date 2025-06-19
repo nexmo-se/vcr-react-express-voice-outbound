@@ -5,6 +5,9 @@ instance:
   runtime: nodejs22
   region: aws.use1
   application-id: XXXX
+  environment:
+    - name: FRONTEND_URL
+      value: "YOUR_FRONTEND_URL_HERE"
   entrypoint:
     - node
     - index.js

@@ -14,6 +14,11 @@ import {
 } from "@mui/material";
 import "./App.css";
 
+const BACKEND_URL =
+  process.env.NODE_ENV === "production"
+    ? "https://neru-4f2ff535-epic-call-app-backend-dev.use1.runtime.vonage.cloud"
+    : "";
+
 function App() {
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
@@ -35,7 +40,7 @@ function App() {
     setResponse(null);
     setAppInfo(null);
     try {
-      const res = await axios.post("/api/lvns", {
+      const res = await axios.post(`${BACKEND_URL}/api/lvns`, {
         apiKey,
         apiSecret,
       });
@@ -54,7 +59,7 @@ function App() {
     setResponse(null);
     setAppLoading(true);
     try {
-      const res = await axios.post("/api/subaccount-app", {
+      const res = await axios.post(`${BACKEND_URL}/api/subaccount-app`, {
         subaccountApiKey: apiKey,
         subaccountApiSecret: apiSecret,
       });
@@ -79,7 +84,7 @@ function App() {
         setLoading(false);
         return;
       }
-      const res = await axios.post("/api/call", {
+      const res = await axios.post(`${BACKEND_URL}/api/call`, {
         subaccountApiKey: apiKey,
         from: selectedLvn,
         to,
@@ -104,7 +109,7 @@ function App() {
     const intervalId = setInterval(async () => {
       if (!pollActiveRef.current) return;
       try {
-        const statusRes = await axios.get("/api/call-status", {
+        const statusRes = await axios.get(`${BACKEND_URL}/api/call-status`, {
           params: { uuid: callUuid },
         });
         setCallStatus(statusRes.data);
