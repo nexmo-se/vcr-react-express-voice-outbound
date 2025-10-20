@@ -1,3 +1,6 @@
+# DEV
+DEV
+
 # VCR configuration file
 /backend/vcr.yaml
 /frontend/vcr.yaml
@@ -140,3 +143,5 @@ dist
 .pnp.*
 backend/vcr.yml
 frontend/vcr.yml
+backend/vcr-backend.yml
+frontend/vcr-frontend.yml

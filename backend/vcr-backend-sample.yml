@@ -8,6 +8,10 @@ instance:
   environment:
     - name: FRONTEND_URL
       value: "YOUR_FRONTEND_URL_HERE"
+    - name: MASTER_API_KEY
+      value: "YOUR_MASTER_API_KEY_HERE"
+    - name: MASTER_API_SECRET_KEY
+      value: "YOUR_MASTER_API_SECRET_HERE"
   entrypoint:
     - node
     - index.js
