@@ -33,6 +33,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [appLoading, setAppLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [buyLoading, setBuyLoading] = useState(false);
   const [callUuid, setCallUuid] = useState("");
   const [callStatus, setCallStatus] = useState(null);
   const pollActiveRef = useRef(false);
@@ -113,8 +115,21 @@ function App() {
       });
       const numbers = res.data.numbers || [];
       setLvns(numbers);
-      if (numbers.length > 0) setSelectedLvn(numbers[0].msisdn);
-      else setResponse({ error: "No LVNs found for this account." });
+      if (numbers.length > 0) {
+        setSelectedLvn(numbers[0].msisdn);
+        setResponse({
+          success: true,
+          message: `Successfully fetched ${numbers.length} LVN${
+            numbers.length > 1 ? "s" : ""
+          } for this subaccount`,
+          data: {
+            count: numbers.length,
+            numbers: numbers.map((n) => n.msisdn),
+          },
+        });
+      } else {
+        setResponse({ error: "No LVNs found for this account." });
+      }
     } catch (err) {
       setResponse({ error: err.response?.data?.error || err.message });
     }
@@ -123,6 +138,222 @@ function App() {
   // Fetch LVNs for selected subaccount with provided secret
   const handleGetLvns = async () => {
     await fetchLvnsForAccount(selectedSubaccount, subaccountSecret);
+  };
+
+  // Cancel/Release the selected LVN
+  const handleCancelLvn = async () => {
+    if (!selectedLvn) {
+      setResponse({ error: "Please select an LVN to cancel" });
+      return;
+    }
+
+    // Add confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to cancel/release the LVN ${selectedLvn}? This action cannot be undone and you will lose this phone number permanently.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setCancelLoading(true);
+    setResponse(null);
+
+    try {
+      // Extract country code from the LVN (first 1-3 digits)
+      // This is a simple heuristic - for production, you might want to store country with each LVN
+      let country = "";
+      if (selectedLvn.startsWith("1")) {
+        country = "US"; // North America
+      } else if (selectedLvn.startsWith("44")) {
+        country = "GB"; // UK
+      } else if (selectedLvn.startsWith("49")) {
+        country = "DE"; // Germany
+      } else if (selectedLvn.startsWith("33")) {
+        country = "FR"; // France
+      } else if (selectedLvn.startsWith("39")) {
+        country = "IT"; // Italy
+      } else if (selectedLvn.startsWith("34")) {
+        country = "ES"; // Spain
+      } else if (selectedLvn.startsWith("31")) {
+        country = "NL"; // Netherlands
+      } else if (selectedLvn.startsWith("32")) {
+        country = "BE"; // Belgium
+      } else if (selectedLvn.startsWith("41")) {
+        country = "CH"; // Switzerland
+      } else if (selectedLvn.startsWith("43")) {
+        country = "AT"; // Austria
+      } else if (selectedLvn.startsWith("45")) {
+        country = "DK"; // Denmark
+      } else if (selectedLvn.startsWith("46")) {
+        country = "SE"; // Sweden
+      } else if (selectedLvn.startsWith("47")) {
+        country = "NO"; // Norway
+      } else if (selectedLvn.startsWith("358")) {
+        country = "FI"; // Finland
+      } else if (selectedLvn.startsWith("61")) {
+        country = "AU"; // Australia
+      } else {
+        // Default fallback - ask user to specify
+        country = prompt(
+          "Please enter the 2-letter country code for this number (e.g., US, GB, DE):"
+        );
+        if (!country) {
+          setCancelLoading(false);
+          setResponse({
+            error: "Country code is required to cancel the number",
+          });
+          return;
+        }
+        country = country.toUpperCase();
+      }
+
+      const res = await axios.post(`${BACKEND_URL}/api/cancel-number`, {
+        masterApiKey,
+        subaccountApiKey: selectedSubaccount,
+        subaccountSecret: subaccountSecret,
+        msisdn: selectedLvn,
+        country: country,
+      });
+
+      const successMessage = {
+        success: true,
+        message: `LVN ${selectedLvn} has been cancelled successfully`,
+        data: res.data,
+      };
+
+      // Refresh the LVNs list to remove the cancelled number
+      // But don't let it overwrite our success message
+      try {
+        const lvnRes = await axios.post(`${BACKEND_URL}/api/lvns`, {
+          masterApiKey,
+          subaccountApiKey: selectedSubaccount,
+          subaccountSecret: subaccountSecret,
+        });
+        const numbers = lvnRes.data.numbers || [];
+        setLvns(numbers);
+        if (numbers.length > 0) {
+          setSelectedLvn(numbers[0].msisdn);
+        } else {
+          setSelectedLvn("");
+        }
+      } catch (refreshErr) {
+        console.log("Error refreshing LVNs after cancel:", refreshErr);
+        // Don't overwrite the success message even if refresh fails
+        setLvns([]);
+        setSelectedLvn("");
+      }
+
+      // Set the success message after LVN refresh
+      setResponse(successMessage);
+    } catch (err) {
+      setResponse({ error: err.response?.data?.error || err.message });
+    }
+
+    setCancelLoading(false);
+  };
+
+  // Buy/Purchase a new LVN
+  const handleBuyLvn = async () => {
+    if (!selectedSubaccount || !subaccountSecret) {
+      setResponse({
+        error: "Please select a subaccount and provide credentials",
+      });
+      return;
+    }
+
+    // Ask user for country code to search for numbers
+    const country = prompt(
+      "Enter the 2-letter country code to search for numbers (e.g., US, GB, DE):"
+    );
+    if (!country) {
+      return;
+    }
+
+    setBuyLoading(true);
+    setResponse(null);
+
+    try {
+      // First, search for available numbers
+      const searchRes = await axios.post(`${BACKEND_URL}/api/search-numbers`, {
+        masterApiKey,
+        subaccountApiKey: selectedSubaccount,
+        subaccountSecret: subaccountSecret,
+        country: country.toUpperCase(),
+        features: "VOICE", // We want numbers that support voice calls
+      });
+
+      const availableNumbers = searchRes.data.numbers || [];
+
+      if (availableNumbers.length === 0) {
+        setResponse({
+          error: `No numbers available for purchase in ${country.toUpperCase()}`,
+        });
+        setBuyLoading(false);
+        return;
+      }
+
+      // Show user the first available number and ask for confirmation
+      const firstNumber = availableNumbers[0];
+      const cost = firstNumber.cost || "unknown";
+      const confirmed = window.confirm(
+        `Purchase number ${firstNumber.msisdn} for €${cost}/month?\n\nType: ${
+          firstNumber.type
+        }\nFeatures: ${firstNumber.features?.join(", ") || "N/A"}`
+      );
+
+      if (!confirmed) {
+        setBuyLoading(false);
+        return;
+      }
+
+      // Buy the selected number
+      const buyRes = await axios.post(`${BACKEND_URL}/api/buy-number`, {
+        masterApiKey,
+        subaccountApiKey: selectedSubaccount,
+        subaccountSecret: subaccountSecret,
+        msisdn: firstNumber.msisdn,
+        country: country.toUpperCase(),
+      });
+
+      const successMessage = {
+        success: true,
+        message: `LVN ${firstNumber.msisdn} has been purchased successfully`,
+        data: buyRes.data,
+      };
+
+      // Refresh the LVNs list to include the new number
+      try {
+        const lvnRes = await axios.post(`${BACKEND_URL}/api/lvns`, {
+          masterApiKey,
+          subaccountApiKey: selectedSubaccount,
+          subaccountSecret: subaccountSecret,
+        });
+        const numbers = lvnRes.data.numbers || [];
+        setLvns(numbers);
+        // Select the newly purchased number
+        if (numbers.length > 0) {
+          const newNumber = numbers.find(
+            (n) => n.msisdn === firstNumber.msisdn
+          );
+          if (newNumber) {
+            setSelectedLvn(newNumber.msisdn);
+          } else {
+            setSelectedLvn(numbers[0].msisdn);
+          }
+        }
+      } catch (refreshErr) {
+        console.log("Error refreshing LVNs after purchase:", refreshErr);
+        // Don't overwrite the success message even if refresh fails
+      }
+
+      // Set the success message after LVN refresh
+      setResponse(successMessage);
+    } catch (err) {
+      setResponse({ error: err.response?.data?.error || err.message });
+    }
+
+    setBuyLoading(false);
   };
 
   // Create or get subaccount application
@@ -298,6 +529,30 @@ function App() {
                   ))}
                 </Select>
               </FormControl>
+
+              <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={handleCancelLvn}
+                  disabled={!selectedLvn || cancelLoading || !subaccountSecret}
+                  sx={{ flex: 1 }}
+                >
+                  {cancelLoading ? "Cancelling..." : "Cancel/Release LVN"}
+                </Button>
+
+                <Button
+                  variant="outlined"
+                  color="success"
+                  onClick={handleBuyLvn}
+                  disabled={
+                    !selectedSubaccount || !subaccountSecret || buyLoading
+                  }
+                  sx={{ flex: 1 }}
+                >
+                  {buyLoading ? "Buying..." : "Buy LVN"}
+                </Button>
+              </Box>
 
               <TextField
                 label="To"

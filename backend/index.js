@@ -362,6 +362,222 @@ app.post("/api/subaccount-app", async (req, res) => {
   }
 });
 
+// Cancel/Release a number (LVN) for a subaccount
+app.post("/api/cancel-number", async (req, res) => {
+  const { masterApiKey, subaccountApiKey, subaccountSecret, msisdn, country } =
+    req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  if (!subaccountApiKey) {
+    return res.status(400).json({ error: "Subaccount API key required" });
+  }
+
+  if (!subaccountSecret) {
+    return res.status(400).json({ error: "Subaccount secret required" });
+  }
+
+  if (!msisdn) {
+    return res.status(400).json({ error: "Phone number (msisdn) required" });
+  }
+
+  if (!country) {
+    return res.status(400).json({ error: "Country code required" });
+  }
+
+  try {
+    console.log(
+      `Cancelling number ${msisdn} for subaccount: ${subaccountApiKey}`
+    );
+
+    // Use the subaccount credentials to cancel the number
+    const basicAuth = Buffer.from(
+      `${subaccountApiKey}:${subaccountSecret}`
+    ).toString("base64");
+
+    // Prepare form data for the cancel request
+    const formData = new URLSearchParams();
+    formData.append("country", country);
+    formData.append("msisdn", msisdn);
+    // Do NOT include target_api_key when using subaccount credentials directly
+
+    const cancelResponse = await axios.post(
+      "https://rest.nexmo.com/number/cancel",
+      formData,
+      {
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    console.log(
+      `Successfully cancelled number ${msisdn}:`,
+      cancelResponse.data
+    );
+    res.json({
+      success: true,
+      message: `Number ${msisdn} has been cancelled successfully`,
+      data: cancelResponse.data,
+    });
+  } catch (err) {
+    console.error(
+      "Error cancelling number:",
+      err.response?.data || err.message
+    );
+    console.error("Full error:", err);
+    res.status(500).json({
+      error: err.response?.data?.error || err.response?.data || err.message,
+      details: err.response?.data,
+    });
+  }
+});
+
+// Search available numbers for purchase
+app.post("/api/search-numbers", async (req, res) => {
+  const {
+    masterApiKey,
+    subaccountApiKey,
+    subaccountSecret,
+    country,
+    type,
+    features,
+  } = req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  if (!subaccountApiKey) {
+    return res.status(400).json({ error: "Subaccount API key required" });
+  }
+
+  if (!subaccountSecret) {
+    return res.status(400).json({ error: "Subaccount secret required" });
+  }
+
+  if (!country) {
+    return res.status(400).json({ error: "Country code required" });
+  }
+
+  try {
+    console.log(
+      `Searching available numbers in ${country} for subaccount: ${subaccountApiKey}`
+    );
+
+    // Use the subaccount credentials to search for available numbers
+    const basicAuth = Buffer.from(
+      `${subaccountApiKey}:${subaccountSecret}`
+    ).toString("base64");
+
+    // Build query parameters
+    const params = new URLSearchParams();
+    params.append("country", country);
+    if (type) params.append("type", type);
+    if (features) params.append("features", features);
+    params.append("size", "10"); // Limit to 10 results
+
+    const searchResponse = await axios.get(
+      `https://rest.nexmo.com/number/search?${params}`,
+      {
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+        },
+      }
+    );
+
+    console.log(
+      `Found ${searchResponse.data.count || 0} available numbers in ${country}`
+    );
+    res.json(searchResponse.data);
+  } catch (err) {
+    console.error(
+      "Error searching numbers:",
+      err.response?.data || err.message
+    );
+    console.error("Full error:", err);
+    res.status(500).json({
+      error: err.response?.data?.error || err.response?.data || err.message,
+      details: err.response?.data,
+    });
+  }
+});
+
+// Buy/Purchase a number for a subaccount
+app.post("/api/buy-number", async (req, res) => {
+  const { masterApiKey, subaccountApiKey, subaccountSecret, msisdn, country } =
+    req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  if (!subaccountApiKey) {
+    return res.status(400).json({ error: "Subaccount API key required" });
+  }
+
+  if (!subaccountSecret) {
+    return res.status(400).json({ error: "Subaccount secret required" });
+  }
+
+  if (!msisdn) {
+    return res.status(400).json({ error: "Phone number (msisdn) required" });
+  }
+
+  if (!country) {
+    return res.status(400).json({ error: "Country code required" });
+  }
+
+  try {
+    console.log(`Buying number ${msisdn} for subaccount: ${subaccountApiKey}`);
+
+    // Use the subaccount credentials to buy the number
+    const basicAuth = Buffer.from(
+      `${subaccountApiKey}:${subaccountSecret}`
+    ).toString("base64");
+
+    // Prepare form data for the buy request
+    const formData = new URLSearchParams();
+    formData.append("country", country);
+    formData.append("msisdn", msisdn);
+    // Do NOT include target_api_key when using subaccount credentials directly
+
+    const buyResponse = await axios.post(
+      "https://rest.nexmo.com/number/buy",
+      formData,
+      {
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    console.log(`Successfully bought number ${msisdn}:`, buyResponse.data);
+    res.json({
+      success: true,
+      message: `Number ${msisdn} has been purchased successfully`,
+      data: buyResponse.data,
+    });
+  } catch (err) {
+    console.error("Error buying number:", err.response?.data || err.message);
+    console.error("Full error:", err);
+    res.status(500).json({
+      error: err.response?.data?.error || err.response?.data || err.message,
+      details: err.response?.data,
+    });
+  }
+});
+
 // Make a voice call from subaccount LVN using private key from State Provider
 app.post("/api/call", async (req, res) => {
   const { masterApiKey, subaccountApiKey, from, to, text } = req.body;

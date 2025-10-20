@@ -8,6 +8,8 @@ This app demonstrates how to use the Vonage API to make outbound voice calls fro
 - **Subaccount Selection**: View and select from a list of available subaccounts.
 - **Subaccount Credential Input**: Enter subaccount API secret for secure access.
 - **LVN Management**: Fetch LVNs using subaccount's own credentials (following Vonage API best practices).
+- **LVN Cancel/Release**: Cancel or release LVNs that are no longer needed (with confirmation dialog).
+- **LVN Purchase**: Search for and buy new phone numbers for the subaccount with cost preview.
 - **Voice Application Management**: Create Vonage Voice Applications using subaccount credentials.
 - **Outbound Calling**: Make outbound calls using the selected LVN as the caller ID.
 - **Real-time Call Status**: View real-time call status updates in the UI (via webhook events).
@@ -88,43 +90,55 @@ npm install
    - The app uses the **subaccount's own credentials** (API key + secret) to fetch LVNs directly.
    - This follows Vonage API best practices for subaccount access.
    - If valid, available LVNs are fetched and the dropdown is populated. The first LVN is selected by default.
+   - A success message is displayed showing how many LVNs were found and which numbers are available.
 
-   **Sample Response:**
+   **Sample Success Response:**
 
    ```json
    {
-     "count": 5,
-     "numbers": [
-       {
-         "country": "US",
-         "msisdn": "12089908002",
-         "type": "mobile-lvn",
-         "features": ["VOICE", "MMS", "SMS"]
-       },
-       {
-         "country": "MX",
-         "msisdn": "525588967943",
-         "type": "landline",
-         "features": ["VOICE"]
-       }
-     ]
+     "success": true,
+     "message": "Successfully fetched 2 LVNs for this subaccount",
+     "data": {
+       "count": 2,
+       "numbers": ["12089908002", "525588967943"]
+     }
    }
    ```
 
-5. **Create or Get Subaccount Application and Private Key**
+5. **Cancel/Release LVN (Optional)**
+
+   - If a user no longer needs an LVN, they can select it from the dropdown and click **"Cancel/Release LVN"**.
+   - A confirmation dialog appears asking the user to confirm the action, as it cannot be undone.
+   - The app uses the **subaccount's own credentials** to cancel the number using the Vonage Numbers API.
+   - The country code is automatically detected from the phone number format or prompted from the user if needed.
+   - After successful cancellation, the LVN list is refreshed to remove the cancelled number.
+   - **Note**: Once cancelled, the phone number is permanently released and cannot be recovered.
+
+6. **Buy LVN (Optional)**
+
+   - If a user needs a new phone number, they can click **"Buy LVN"** (located next to Cancel/Release LVN).
+   - The app prompts for a 2-letter country code (e.g., US, GB, DE) to search for available numbers.
+   - The app searches for available numbers in the specified country using the **subaccount's own credentials**.
+   - The first available number is displayed with pricing information and features.
+   - A confirmation dialog shows the number details including cost per month and supported features (VOICE, SMS, etc.).
+   - Upon confirmation, the number is purchased and automatically added to the LVN list.
+   - The newly purchased number is automatically selected in the dropdown.
+   - **Note**: Purchasing a number will incur monthly charges as shown in the confirmation dialog.
+
+7. **Create or Get Subaccount Application and Private Key**
 
    - The user clicks **"Create or Get Subaccount Application"**.
    - The backend uses the **subaccount's own credentials** to create a new Vonage Application for the subaccount (if one does not exist) and stores the private key using the VCR State Provider.
    - The Application ID is displayed in the UI.
 
-6. **Make a Call**
+8. **Make a Call**
 
    - The user enters the destination ("To") number and clicks **"Call"**.
    - The app uses the selected LVN as the "from" number and the provided "to" number.
    - The backend uses the subaccount's Application ID and Private Key to authenticate and send the outbound call via the Vonage Voice API.
    - All errors (authentication, no LVNs, call errors) and success responses are displayed in the UI.
 
-7. **View Call Status (Webhook Events)**
+9. **View Call Status (Webhook Events)**
    - After a call is initiated, the backend receives real-time call status updates from Vonage via the event webhook.
    - The backend stores the latest status for each call.
    - The frontend polls for status updates and displays them in the UI (e.g., "started", "ringing", "answered", "completed").
