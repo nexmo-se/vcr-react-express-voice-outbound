@@ -210,6 +210,75 @@ Your backend receives these events at the `/webhooks/event` endpoint, stores the
 - **Application persistence**: The backend stores subaccount application info and private key for reuse using the VCR State Provider.
 - **Webhook events**: The backend receives and stores call status updates, and the frontend displays them in real time.
 
+## VCR State Storage
+
+The application uses Vonage Cloud Runtime (VCR) State Provider to persist critical application data across sessions. This ensures that applications don't need to be recreated every time and that private keys are securely stored.
+
+### **What is Stored in VCR State:**
+
+#### 1. **Application Information**
+
+- **Key:** `"subaccount_apps"`
+- **Type:** JSON Object
+- **Purpose:** Maps subaccount API keys to their Voice application metadata
+- **Structure:**
+
+  ```javascript
+  {
+    "subaccount_api_key_1": {
+      "applicationId": "12345678-abcd-1234-efgh-567890123456",
+      "privateKeyName": "private_key_12345678-abcd-1234-efgh-567890123456"
+    },
+    "subaccount_api_key_2": {
+      "applicationId": "87654321-dcba-4321-hgfe-098765432109",
+      "privateKeyName": "private_key_87654321-dcba-4321-hgfe-098765432109"
+    }
+  }
+  ```
+
+#### 2. **Private Keys**
+
+- **Key Pattern:** `"private_key_{applicationId}"`
+- **Type:** String (PEM format)
+- **Purpose:** Stores the private keys for JWT authentication with Vonage Voice API
+- **Example Keys:**
+  - `"private_key_12345678-abcd-1234-efgh-567890123456"`
+  - `"private_key_87654321-dcba-4321-hgfe-098765432109"`
+- **Security:** Keys are encrypted and securely stored by VCR State Provider
+
+### **What is NOT Stored in VCR State:**
+
+For security and best practice reasons, the following sensitive information is **not** persisted:
+
+- ❌ **Subaccount Secrets** - Must be entered by users each session
+- ❌ **Master API Key** - Stored only in environment variables and frontend session
+- ❌ **Subaccount Details** - Fetched fresh from Vonage API each time
+- ❌ **Call Status Data** - Temporary webhook data, not persisted long-term
+
+### **Benefits of VCR State Storage:**
+
+1. **Application Reuse** - Vonage Voice applications are created once per subaccount and reused
+2. **Private Key Security** - Private keys are securely encrypted and stored by VCR
+3. **Performance** - Avoids recreating applications unnecessarily
+4. **Persistence** - Data survives application restarts and deployments
+5. **Scalability** - Supports multiple subaccounts with individual applications
+
+### **State Management Functions:**
+
+The backend includes helper functions for VCR State operations:
+
+```javascript
+// Load and save application mappings
+async function loadApps()           // Retrieves subaccount_apps from state
+async function saveApps(apps)       // Stores subaccount_apps to state
+
+// Private key management
+async function savePrivateKey(keyName, privateKey)  // Stores encrypted private key
+async function loadPrivateKey(keyName)              // Retrieves private key for JWT auth
+```
+
+This architecture ensures secure, efficient management of Vonage Voice applications while maintaining proper separation of sensitive credentials.
+
 ## Work History
 
 1. Requires 2 VCR application ID's first for frontend and second for backend.
