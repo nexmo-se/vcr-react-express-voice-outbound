@@ -13,6 +13,7 @@ This app demonstrates how to use the Vonage API to make outbound voice calls fro
 - **Voice Application Management**: Create Vonage Voice Applications using subaccount credentials.
 - **Outbound Calling**: Make outbound calls using the selected LVN as the caller ID.
 - **Real-time Call Status**: View real-time call status updates in the UI (via webhook events).
+- **Response History**: Track and review previous API responses with collapsible history panel.
 - **Error Handling**: View API responses and errors in the UI.
 
 ## Debug or Deploy VCR App
@@ -203,6 +204,7 @@ Your backend receives these events at the `/webhooks/event` endpoint, stores the
 - **No Automatic LVN Fetching**: LVNs are fetched only when the user explicitly provides subaccount credentials and clicks "Get Subaccount LVNs".
 - **Credential Validation**: Subaccount credentials are validated during API requests, providing immediate feedback for invalid secrets.
 - **All errors** (authentication, invalid credentials, no LVNs, call errors) are shown in the UI.
+- **Response History**: The UI maintains a history of the last 10 API responses with timestamps and operation labels. Users can expand the history panel to review previous operations and clear the history if needed.
 - **Outbound calls** can only be made by a subaccount's Vonage Application ID and Private Key.
 - **LVN selection**: The first available LVN is selected by default after fetching.
 - **Application persistence**: The backend stores subaccount application info and private key for reuse using the VCR State Provider.

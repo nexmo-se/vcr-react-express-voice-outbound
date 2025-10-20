@@ -11,7 +11,13 @@ import {
   FormControl,
   InputLabel,
   Paper,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Chip,
+  Divider,
 } from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import "./App.css";
 
 const BACKEND_URL =
@@ -29,6 +35,7 @@ function App() {
   const [selectedLvn, setSelectedLvn] = useState("");
   const [to, setTo] = useState("");
   const [response, setResponse] = useState(null);
+  const [responseHistory, setResponseHistory] = useState([]);
   const [appInfo, setAppInfo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [appLoading, setAppLoading] = useState(false);
@@ -39,19 +46,48 @@ function App() {
   const [callStatus, setCallStatus] = useState(null);
   const pollActiveRef = useRef(false);
 
+  // Helper function to add response to history and set current response
+  const addResponseToHistory = (newResponse, operation = "API Operation") => {
+    if (response) {
+      // Add current response to history before setting new one
+      const historyEntry = {
+        id: Date.now(),
+        timestamp: new Date().toLocaleString(),
+        operation: operation,
+        response: response,
+      };
+      setResponseHistory((prev) => [historyEntry, ...prev].slice(0, 10)); // Keep only last 10 responses
+    }
+    setResponse(newResponse);
+  };
+
   // Authenticate with master API key
   const handleAuthenticate = async () => {
     setAuthLoading(true);
     setResponse(null);
     try {
-      await axios.post(`${BACKEND_URL}/api/authenticate`, {
+      const res = await axios.post(`${BACKEND_URL}/api/authenticate`, {
         masterApiKey,
       });
       setIsAuthenticated(true);
+
+      // Add success response to history
+      addResponseToHistory(
+        {
+          success: true,
+          message: "Successfully authenticated as Account Admin",
+          data: res.data,
+        },
+        "Authentication"
+      );
+
       // Automatically fetch subaccounts after successful authentication
       await handleGetSubaccounts();
     } catch (err) {
-      setResponse({ error: err.response?.data?.error || err.message });
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Authentication"
+      );
       setIsAuthenticated(false);
     }
     setAuthLoading(false);
@@ -91,15 +127,28 @@ function App() {
         setSelectedSubaccount(defaultAccount);
         // User will need to provide subaccount secret manually to fetch LVNs
       }
+
+      addResponseToHistory(
+        {
+          message: `Successfully fetched ${formattedSubaccounts.length} subaccounts`,
+        },
+        "Fetch Subaccounts"
+      );
     } catch (err) {
-      setResponse({ error: err.response?.data?.error || err.message });
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Fetch Subaccounts"
+      );
     }
   };
 
   // Fetch LVNs for a specific account with provided secret
   const fetchLvnsForAccount = async (accountApiKey, accountSecret) => {
     if (!accountSecret) {
-      setResponse({ error: "Subaccount secret is required to fetch LVNs." });
+      addResponseToHistory(
+        { error: "Subaccount secret is required to fetch LVNs." },
+        "Fetch LVNs"
+      );
       return;
     }
 
@@ -117,21 +166,30 @@ function App() {
       setLvns(numbers);
       if (numbers.length > 0) {
         setSelectedLvn(numbers[0].msisdn);
-        setResponse({
-          success: true,
-          message: `Successfully fetched ${numbers.length} LVN${
-            numbers.length > 1 ? "s" : ""
-          } for this subaccount`,
-          data: {
-            count: numbers.length,
-            numbers: numbers.map((n) => n.msisdn),
+        addResponseToHistory(
+          {
+            success: true,
+            message: `Successfully fetched ${numbers.length} LVN${
+              numbers.length > 1 ? "s" : ""
+            } for this subaccount`,
+            data: {
+              count: numbers.length,
+              numbers: numbers.map((n) => n.msisdn),
+            },
           },
-        });
+          "Fetch LVNs"
+        );
       } else {
-        setResponse({ error: "No LVNs found for this account." });
+        addResponseToHistory(
+          { error: "No LVNs found for this account." },
+          "Fetch LVNs"
+        );
       }
     } catch (err) {
-      setResponse({ error: err.response?.data?.error || err.message });
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Fetch LVNs"
+      );
     }
   };
 
@@ -143,7 +201,10 @@ function App() {
   // Cancel/Release the selected LVN
   const handleCancelLvn = async () => {
     if (!selectedLvn) {
-      setResponse({ error: "Please select an LVN to cancel" });
+      addResponseToHistory(
+        { error: "Please select an LVN to cancel" },
+        "Cancel LVN"
+      );
       return;
     }
 
@@ -200,9 +261,12 @@ function App() {
         );
         if (!country) {
           setCancelLoading(false);
-          setResponse({
-            error: "Country code is required to cancel the number",
-          });
+          addResponseToHistory(
+            {
+              error: "Country code is required to cancel the number",
+            },
+            "Cancel LVN"
+          );
           return;
         }
         country = country.toUpperCase();
@@ -245,9 +309,12 @@ function App() {
       }
 
       // Set the success message after LVN refresh
-      setResponse(successMessage);
+      addResponseToHistory(successMessage, "Cancel LVN");
     } catch (err) {
-      setResponse({ error: err.response?.data?.error || err.message });
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Cancel LVN"
+      );
     }
 
     setCancelLoading(false);
@@ -256,9 +323,12 @@ function App() {
   // Buy/Purchase a new LVN
   const handleBuyLvn = async () => {
     if (!selectedSubaccount || !subaccountSecret) {
-      setResponse({
-        error: "Please select a subaccount and provide credentials",
-      });
+      addResponseToHistory(
+        {
+          error: "Please select a subaccount and provide credentials",
+        },
+        "Buy LVN"
+      );
       return;
     }
 
@@ -286,9 +356,12 @@ function App() {
       const availableNumbers = searchRes.data.numbers || [];
 
       if (availableNumbers.length === 0) {
-        setResponse({
-          error: `No numbers available for purchase in ${country.toUpperCase()}`,
-        });
+        addResponseToHistory(
+          {
+            error: `No numbers available for purchase in ${country.toUpperCase()}`,
+          },
+          "Buy LVN"
+        );
         setBuyLoading(false);
         return;
       }
@@ -348,9 +421,12 @@ function App() {
       }
 
       // Set the success message after LVN refresh
-      setResponse(successMessage);
+      addResponseToHistory(successMessage, "Buy LVN");
     } catch (err) {
-      setResponse({ error: err.response?.data?.error || err.message });
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Buy LVN"
+      );
     }
 
     setBuyLoading(false);
@@ -368,8 +444,15 @@ function App() {
         subaccountSecret: subaccountSecret,
       });
       setAppInfo(res.data);
+      addResponseToHistory(
+        { message: "Successfully created/retrieved Voice API application" },
+        "Create Application"
+      );
     } catch (err) {
-      setResponse({ error: err.response?.data?.error || err.message });
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Create Application"
+      );
     }
     setAppLoading(false);
   };
@@ -382,9 +465,12 @@ function App() {
     setLoading(true);
     try {
       if (!appInfo) {
-        setResponse({
-          error: "No application info. Please create the application first.",
-        });
+        addResponseToHistory(
+          {
+            error: "No application info. Please create the application first.",
+          },
+          "Make Call"
+        );
         setLoading(false);
         return;
       }
@@ -395,13 +481,16 @@ function App() {
         to,
         text: "This is a call from your subaccount LVN!",
       });
-      setResponse(res.data);
+      addResponseToHistory(res.data, "Make Call");
       const uuid = res.data?.data?.uuid;
       console.log("Set callUuid:", uuid);
       setCallUuid(uuid);
       // DO NOT start polling here!
     } catch (err) {
-      setResponse({ error: err.response?.data?.error || err.message });
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Make Call"
+      );
     }
     setLoading(false);
   };
@@ -597,8 +686,110 @@ function App() {
           )}
 
           <Box>
-            <Typography variant="subtitle1">Response:</Typography>
-            <pre>{response && JSON.stringify(response, null, 2)}</pre>
+            <Typography variant="subtitle1">Current Response:</Typography>
+            {response ? (
+              <Paper variant="outlined" sx={{ p: 2, mb: 1 }}>
+                <Box
+                  sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
+                >
+                  <Chip
+                    label="Latest"
+                    size="small"
+                    color={response.success ? "success" : "error"}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    {new Date().toLocaleString()}
+                  </Typography>
+                </Box>
+                <pre
+                  style={{
+                    margin: 0,
+                    fontSize: "0.875rem",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    overflowWrap: "break-word",
+                    maxWidth: "100%",
+                    overflow: "auto",
+                  }}
+                >
+                  {JSON.stringify(response, null, 2)}
+                </pre>
+              </Paper>
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                No response yet. Perform an action to see results.
+              </Typography>
+            )}
+
+            {/* Response History */}
+            {responseHistory.length > 0 && (
+              <Accordion>
+                <AccordionSummary
+                  expandIcon={<ExpandMoreIcon />}
+                  aria-controls="response-history-content"
+                  id="response-history-header"
+                >
+                  <Typography variant="subtitle2">
+                    Response History ({responseHistory.length})
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ pt: 0 }}>
+                  <Box sx={{ maxHeight: 400, overflowY: "auto" }}>
+                    {responseHistory.map((historyItem) => (
+                      <Paper
+                        key={historyItem.id}
+                        variant="outlined"
+                        sx={{ p: 2, mb: 1, backgroundColor: "grey.50" }}
+                      >
+                        <Box
+                          sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 1,
+                            mb: 1,
+                          }}
+                        >
+                          <Chip
+                            label={historyItem.operation}
+                            size="small"
+                            variant="outlined"
+                            color={
+                              historyItem.response.success ? "success" : "error"
+                            }
+                          />
+                          <Typography variant="caption" color="text.secondary">
+                            {historyItem.timestamp}
+                          </Typography>
+                        </Box>
+                        <pre
+                          style={{
+                            margin: 0,
+                            fontSize: "0.75rem",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                            overflowWrap: "break-word",
+                            maxWidth: "100%",
+                            overflow: "auto",
+                          }}
+                        >
+                          {JSON.stringify(historyItem.response, null, 2)}
+                        </pre>
+                      </Paper>
+                    ))}
+                  </Box>
+                  <Divider sx={{ my: 1 }} />
+                  <Box sx={{ display: "flex", justifyContent: "center" }}>
+                    <Button
+                      size="small"
+                      onClick={() => setResponseHistory([])}
+                      color="secondary"
+                    >
+                      Clear History
+                    </Button>
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+            )}
           </Box>
 
           {callUuid && (
