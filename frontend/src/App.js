@@ -37,11 +37,12 @@ function App() {
   const [response, setResponse] = useState(null);
   const [responseHistory, setResponseHistory] = useState([]);
   const [appInfo, setAppInfo] = useState(null);
+  const [lvnLinkedToApp, setLvnLinkedToApp] = useState(false);
+  const [linkedLvn, setLinkedLvn] = useState(""); // Track which LVN is currently linked to the app
   const [loading, setLoading] = useState(false);
   const [appLoading, setAppLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
-  const [cancelLoading, setCancelLoading] = useState(false);
-  const [buyLoading, setBuyLoading] = useState(false);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [callUuid, setCallUuid] = useState("");
   const [callStatus, setCallStatus] = useState(null);
   const pollActiveRef = useRef(false);
@@ -100,6 +101,8 @@ function App() {
     setLvns([]);
     setSelectedLvn("");
     setAppInfo(null);
+    setLvnLinkedToApp(false);
+    setLinkedLvn("");
     try {
       const res = await axios.post(`${BACKEND_URL}/api/subaccounts`, {
         masterApiKey,
@@ -156,6 +159,8 @@ function App() {
     setSelectedLvn("");
     setResponse(null);
     setAppInfo(null);
+    setLvnLinkedToApp(false);
+    setLinkedLvn("");
     try {
       const res = await axios.post(`${BACKEND_URL}/api/lvns`, {
         masterApiKey,
@@ -199,135 +204,14 @@ function App() {
   };
 
   // Cancel/Release the selected LVN
-  const handleCancelLvn = async () => {
-    if (!selectedLvn) {
-      addResponseToHistory(
-        { error: "Please select an LVN to cancel" },
-        "Cancel LVN"
-      );
-      return;
-    }
-
-    // Add confirmation dialog
-    const confirmed = window.confirm(
-      `Are you sure you want to cancel/release the LVN ${selectedLvn}? This action cannot be undone and you will lose this phone number permanently.`
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setCancelLoading(true);
-    setResponse(null);
-
-    try {
-      // Extract country code from the LVN (first 1-3 digits)
-      // This is a simple heuristic - for production, you might want to store country with each LVN
-      let country = "";
-      if (selectedLvn.startsWith("1")) {
-        country = "US"; // North America
-      } else if (selectedLvn.startsWith("44")) {
-        country = "GB"; // UK
-      } else if (selectedLvn.startsWith("49")) {
-        country = "DE"; // Germany
-      } else if (selectedLvn.startsWith("33")) {
-        country = "FR"; // France
-      } else if (selectedLvn.startsWith("39")) {
-        country = "IT"; // Italy
-      } else if (selectedLvn.startsWith("34")) {
-        country = "ES"; // Spain
-      } else if (selectedLvn.startsWith("31")) {
-        country = "NL"; // Netherlands
-      } else if (selectedLvn.startsWith("32")) {
-        country = "BE"; // Belgium
-      } else if (selectedLvn.startsWith("41")) {
-        country = "CH"; // Switzerland
-      } else if (selectedLvn.startsWith("43")) {
-        country = "AT"; // Austria
-      } else if (selectedLvn.startsWith("45")) {
-        country = "DK"; // Denmark
-      } else if (selectedLvn.startsWith("46")) {
-        country = "SE"; // Sweden
-      } else if (selectedLvn.startsWith("47")) {
-        country = "NO"; // Norway
-      } else if (selectedLvn.startsWith("358")) {
-        country = "FI"; // Finland
-      } else if (selectedLvn.startsWith("61")) {
-        country = "AU"; // Australia
-      } else {
-        // Default fallback - ask user to specify
-        country = prompt(
-          "Please enter the 2-letter country code for this number (e.g., US, GB, DE):"
-        );
-        if (!country) {
-          setCancelLoading(false);
-          addResponseToHistory(
-            {
-              error: "Country code is required to cancel the number",
-            },
-            "Cancel LVN"
-          );
-          return;
-        }
-        country = country.toUpperCase();
-      }
-
-      const res = await axios.post(`${BACKEND_URL}/api/cancel-number`, {
-        masterApiKey,
-        subaccountApiKey: selectedSubaccount,
-        subaccountSecret: subaccountSecret,
-        msisdn: selectedLvn,
-        country: country,
-      });
-
-      const successMessage = {
-        success: true,
-        message: `LVN ${selectedLvn} has been cancelled successfully`,
-        data: res.data,
-      };
-
-      // Refresh the LVNs list to remove the cancelled number
-      // But don't let it overwrite our success message
-      try {
-        const lvnRes = await axios.post(`${BACKEND_URL}/api/lvns`, {
-          masterApiKey,
-          subaccountApiKey: selectedSubaccount,
-          subaccountSecret: subaccountSecret,
-        });
-        const numbers = lvnRes.data.numbers || [];
-        setLvns(numbers);
-        if (numbers.length > 0) {
-          setSelectedLvn(numbers[0].msisdn);
-        } else {
-          setSelectedLvn("");
-        }
-      } catch (refreshErr) {
-        console.log("Error refreshing LVNs after cancel:", refreshErr);
-        // Don't overwrite the success message even if refresh fails
-        setLvns([]);
-        setSelectedLvn("");
-      }
-
-      // Set the success message after LVN refresh
-      addResponseToHistory(successMessage, "Cancel LVN");
-    } catch (err) {
-      addResponseToHistory(
-        { error: err.response?.data?.error || err.message },
-        "Cancel LVN"
-      );
-    }
-
-    setCancelLoading(false);
-  };
-
-  // Buy/Purchase a new LVN
-  const handleBuyLvn = async () => {
+  // Purchase/Assign LVN - Search for and buy a new number, then assign to application
+  const handlePurchaseAssignLvn = async () => {
     if (!selectedSubaccount || !subaccountSecret) {
       addResponseToHistory(
         {
           error: "Please select a subaccount and provide credentials",
         },
-        "Buy LVN"
+        "Purchase/Assign LVN"
       );
       return;
     }
@@ -340,59 +224,22 @@ function App() {
       return;
     }
 
-    setBuyLoading(true);
+    setPurchaseLoading(true);
     setResponse(null);
 
     try {
-      // First, search for available numbers
-      const searchRes = await axios.post(`${BACKEND_URL}/api/search-numbers`, {
+      const res = await axios.post(`${BACKEND_URL}/api/purchase-assign-lvn`, {
         masterApiKey,
         subaccountApiKey: selectedSubaccount,
         subaccountSecret: subaccountSecret,
         country: country.toUpperCase(),
-        features: "VOICE", // We want numbers that support voice calls
       });
 
-      const availableNumbers = searchRes.data.numbers || [];
-
-      if (availableNumbers.length === 0) {
-        addResponseToHistory(
-          {
-            error: `No numbers available for purchase in ${country.toUpperCase()}`,
-          },
-          "Buy LVN"
-        );
-        setBuyLoading(false);
-        return;
-      }
-
-      // Show user the first available number and ask for confirmation
-      const firstNumber = availableNumbers[0];
-      const cost = firstNumber.cost || "unknown";
-      const confirmed = window.confirm(
-        `Purchase number ${firstNumber.msisdn} for €${cost}/month?\n\nType: ${
-          firstNumber.type
-        }\nFeatures: ${firstNumber.features?.join(", ") || "N/A"}`
-      );
-
-      if (!confirmed) {
-        setBuyLoading(false);
-        return;
-      }
-
-      // Buy the selected number
-      const buyRes = await axios.post(`${BACKEND_URL}/api/buy-number`, {
-        masterApiKey,
-        subaccountApiKey: selectedSubaccount,
-        subaccountSecret: subaccountSecret,
-        msisdn: firstNumber.msisdn,
-        country: country.toUpperCase(),
-      });
-
+      const purchasedNumber = res.data.data.purchased_number;
       const successMessage = {
         success: true,
-        message: `LVN ${firstNumber.msisdn} has been purchased successfully`,
-        data: buyRes.data,
+        message: `LVN ${purchasedNumber.msisdn} has been purchased successfully`,
+        data: res.data,
       };
 
       // Refresh the LVNs list to include the new number
@@ -407,7 +254,7 @@ function App() {
         // Select the newly purchased number
         if (numbers.length > 0) {
           const newNumber = numbers.find(
-            (n) => n.msisdn === firstNumber.msisdn
+            (n) => n.msisdn === purchasedNumber.msisdn
           );
           if (newNumber) {
             setSelectedLvn(newNumber.msisdn);
@@ -421,18 +268,21 @@ function App() {
       }
 
       // Set the success message after LVN refresh
-      addResponseToHistory(successMessage, "Buy LVN");
+      addResponseToHistory(successMessage, "Purchase/Assign LVN");
     } catch (err) {
       addResponseToHistory(
-        { error: err.response?.data?.error || err.message },
-        "Buy LVN"
+        {
+          error: err.response?.data?.error || err.message,
+          step: err.response?.data?.step || "unknown",
+        },
+        "Purchase/Assign LVN"
       );
     }
 
-    setBuyLoading(false);
+    setPurchaseLoading(false);
   };
 
-  // Create or get subaccount application
+  // Create or get subaccount application and assign LVN
   const handleGetOrCreateApp = async () => {
     setAppInfo(null);
     setResponse(null);
@@ -442,10 +292,24 @@ function App() {
         masterApiKey,
         subaccountApiKey: selectedSubaccount,
         subaccountSecret: subaccountSecret,
+        selectedLvn: selectedLvn, // Pass the selected LVN for assignment
       });
       setAppInfo(res.data);
+
+      // Mark that the current LVN is now linked to the application
+      setLvnLinkedToApp(true);
+      setLinkedLvn(selectedLvn);
+
       addResponseToHistory(
-        { message: "Successfully created/retrieved Voice API application" },
+        {
+          success: true,
+          message:
+            res.data.message ||
+            "Successfully created/retrieved Voice API application",
+          action: res.data.action,
+          applicationId: res.data.applicationId,
+          data: res.data,
+        },
         "Create Application"
       );
     } catch (err) {
@@ -527,6 +391,14 @@ function App() {
       clearInterval(intervalId);
     };
   }, [callUuid]);
+
+  // Watch for LVN selection changes and reset linking status
+  useEffect(() => {
+    if (linkedLvn && selectedLvn && selectedLvn !== linkedLvn) {
+      // User selected a different LVN, need to re-link to application
+      setLvnLinkedToApp(false);
+    }
+  }, [selectedLvn, linkedLvn]);
 
   return (
     <Container maxWidth="sm" sx={{ mt: 4 }}>
@@ -619,27 +491,17 @@ function App() {
                 </Select>
               </FormControl>
 
-              <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
+              <Box sx={{ mt: 1 }}>
                 <Button
                   variant="outlined"
-                  color="error"
-                  onClick={handleCancelLvn}
-                  disabled={!selectedLvn || cancelLoading || !subaccountSecret}
-                  sx={{ flex: 1 }}
-                >
-                  {cancelLoading ? "Cancelling..." : "Cancel/Release LVN"}
-                </Button>
-
-                <Button
-                  variant="outlined"
-                  color="success"
-                  onClick={handleBuyLvn}
+                  color="primary"
+                  onClick={handlePurchaseAssignLvn}
                   disabled={
-                    !selectedSubaccount || !subaccountSecret || buyLoading
+                    !selectedSubaccount || !subaccountSecret || purchaseLoading
                   }
-                  sx={{ flex: 1 }}
+                  sx={{ width: "100%" }}
                 >
-                  {buyLoading ? "Buying..." : "Buy LVN"}
+                  {purchaseLoading ? "Buying..." : "BUY LVN"}
                 </Button>
               </Box>
 
@@ -677,11 +539,23 @@ function App() {
                 variant="contained"
                 onClick={handleCall}
                 disabled={
-                  !selectedLvn || !to || !appInfo || loading || appLoading
+                  !selectedLvn ||
+                  !to ||
+                  !appInfo ||
+                  loading ||
+                  appLoading ||
+                  !lvnLinkedToApp
                 }
               >
                 {loading ? "Calling..." : "Call"}
               </Button>
+
+              {selectedLvn && appInfo && !lvnLinkedToApp && (
+                <Typography variant="body2" color="warning.main" sx={{ mt: 1 }}>
+                  ⚠️ You selected a different LVN. Click "CREATE OR GET
+                  SUBACCOUNT APPLICATION" to link this LVN before making calls.
+                </Typography>
+              )}
             </>
           )}
 
@@ -793,16 +667,47 @@ function App() {
           </Box>
 
           {callUuid && (
-            <Box>
-              <Typography variant="subtitle1">Call Status:</Typography>
+            <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+              <Box
+                sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}
+              >
+                <Chip
+                  label="Call Status"
+                  size="small"
+                  color={
+                    callStatus?.status === "completed"
+                      ? "success"
+                      : callStatus?.status === "failed"
+                      ? "error"
+                      : "default"
+                  }
+                />
+                {callStatus && (
+                  <Typography variant="caption" color="text.secondary">
+                    {new Date().toLocaleString()}
+                  </Typography>
+                )}
+              </Box>
               {callStatus === null ? (
                 <Typography variant="body2" color="text.secondary">
                   Waiting for call status updates from Vonage...
                 </Typography>
               ) : (
-                <pre>{JSON.stringify(callStatus, null, 2)}</pre>
+                <pre
+                  style={{
+                    margin: 0,
+                    fontSize: "0.875rem",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    overflowWrap: "break-word",
+                    maxWidth: "100%",
+                    overflow: "auto",
+                  }}
+                >
+                  {JSON.stringify(callStatus, null, 2)}
+                </pre>
               )}
-            </Box>
+            </Paper>
           )}
         </Box>
       </Paper>

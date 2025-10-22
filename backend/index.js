@@ -289,7 +289,8 @@ async function loadPrivateKey(keyName) {
 
 // Create or get a subaccount application and store private key in State Provider
 app.post("/api/subaccount-app", async (req, res) => {
-  const { masterApiKey, subaccountApiKey, subaccountSecret } = req.body;
+  const { masterApiKey, subaccountApiKey, subaccountSecret, selectedLvn } =
+    req.body;
   const expectedMasterApiKey = process.env.MASTER_API_KEY;
 
   // Verify master API key
@@ -306,59 +307,225 @@ app.post("/api/subaccount-app", async (req, res) => {
   }
 
   const apps = await loadApps();
+  let appInfo;
+  let isExistingApp = false;
+
   if (apps[subaccountApiKey]) {
-    return res.json(apps[subaccountApiKey]);
-  }
-
-  try {
+    // Use existing application
+    appInfo = apps[subaccountApiKey];
+    isExistingApp = true;
     console.log(
-      `Creating application for subaccount: ${subaccountApiKey} using provided secret`
+      `Using existing application: ${appInfo.applicationId} for subaccount: ${subaccountApiKey}`
     );
+  } else {
+    // Create new application
+    try {
+      console.log(
+        `Creating application for subaccount: ${subaccountApiKey} using provided secret`
+      );
 
-    // Use subaccount credentials to create application
-    const response = await axios.post(
-      "https://api.nexmo.com/v2/applications",
-      {
-        name: `subaccount-app-${subaccountApiKey}`,
-        capabilities: {
-          voice: {
-            webhooks: {
-              answer_url: {
-                address: `${VCR_URL}/webhooks/answer`,
-                http_method: "POST",
-              },
-              event_url: {
-                address: `${VCR_URL}/webhooks/event`,
-                http_method: "POST",
+      // Use subaccount credentials to create application
+      const response = await axios.post(
+        "https://api.nexmo.com/v2/applications",
+        {
+          name: `subaccount-app-${subaccountApiKey}`,
+          capabilities: {
+            voice: {
+              webhooks: {
+                answer_url: {
+                  address: `${VCR_URL}/webhooks/answer`,
+                  http_method: "POST",
+                },
+                event_url: {
+                  address: `${VCR_URL}/webhooks/event`,
+                  http_method: "POST",
+                },
               },
             },
           },
         },
-      },
+        {
+          auth: {
+            username: subaccountApiKey,
+            password: subaccountSecret,
+          },
+        }
+      );
+
+      const privateKeyName = `private_key_${response.data.id}`;
+      await savePrivateKey(privateKeyName, response.data.keys.private_key);
+
+      appInfo = {
+        applicationId: response.data.id,
+        privateKeyName,
+      };
+
+      console.log("Created new application:", appInfo);
+    } catch (err) {
+      console.error(
+        "Error creating subaccount app:",
+        err.response?.data || err.message
+      );
+      return res.status(500).json({ error: err.response?.data || err.message });
+    }
+  }
+
+  // LVN Assignment Logic (for both existing and new applications)
+  let lvnAssignmentResult = null;
+
+  if (selectedLvn) {
+    try {
+      console.log(
+        `Assigning LVN ${selectedLvn} to application ${appInfo.applicationId}`
+      );
+
+      // Use subaccount credentials to assign LVN to app
+      const basicAuth = Buffer.from(
+        `${subaccountApiKey}:${subaccountSecret}`
+      ).toString("base64");
+
+      const assignFormData = new URLSearchParams();
+      assignFormData.append("country", "US"); // Default to US, could be made configurable
+      assignFormData.append("msisdn", selectedLvn);
+      assignFormData.append("app_id", appInfo.applicationId);
+
+      const assignResponse = await axios.post(
+        `https://rest.nexmo.com/number/update?api_key=${subaccountApiKey}&api_secret=${subaccountSecret}`,
+        assignFormData,
+        {
+          headers: {
+            Authorization: `Basic ${basicAuth}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+        }
+      );
+
+      console.log("LVN assigned successfully:", assignResponse.data);
+      lvnAssignmentResult = {
+        success: true,
+        message: `LVN ${selectedLvn} assigned to application`,
+        data: assignResponse.data,
+      };
+    } catch (assignErr) {
+      console.error(
+        "Error assigning LVN to app:",
+        assignErr.response?.data || assignErr.message
+      );
+      lvnAssignmentResult = {
+        success: false,
+        error: "Failed to assign LVN to application",
+        details: assignErr.response?.data || assignErr.message,
+      };
+    }
+  }
+
+  // Prepare final response
+  const finalAppInfo = {
+    ...appInfo,
+    lvnAssignment: lvnAssignmentResult,
+    action: isExistingApp ? "retrieved" : "created",
+    message: isExistingApp
+      ? `Retrieved existing Voice API application: ${appInfo.applicationId}`
+      : `Created new Voice API application: ${appInfo.applicationId}`,
+  };
+
+  // Update stored apps with the latest info
+  apps[subaccountApiKey] = finalAppInfo;
+  await saveApps(apps);
+  console.log("Saved apps:", apps);
+
+  res.json(finalAppInfo);
+});
+
+// Purchase/Assign LVN - Search for and buy a new number for a subaccount
+app.post("/api/purchase-assign-lvn", async (req, res) => {
+  const {
+    masterApiKey,
+    subaccountApiKey,
+    subaccountSecret,
+    country = "US",
+  } = req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  if (!subaccountApiKey) {
+    return res.status(400).json({ error: "Subaccount API key required" });
+  }
+
+  if (!subaccountSecret) {
+    return res.status(400).json({ error: "Subaccount secret required" });
+  }
+
+  try {
+    console.log(
+      `Purchasing and assigning LVN for subaccount: ${subaccountApiKey}`
+    );
+
+    // Use the subaccount credentials for authentication
+    const basicAuth = Buffer.from(
+      `${subaccountApiKey}:${subaccountSecret}`
+    ).toString("base64");
+
+    // Step 1: Search for available numbers
+    console.log("Step 1: Searching for available numbers...");
+    const searchResponse = await axios.get(
+      `https://rest.nexmo.com/number/search?country=${country}&type=mobile-lvn&search_pattern=1&features=SMS,VOICE&size=1`,
       {
-        auth: {
-          username: subaccountApiKey,
-          password: subaccountSecret,
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
         },
       }
     );
 
-    const privateKeyName = `private_key_${response.data.id}`;
-    await savePrivateKey(privateKeyName, response.data.keys.private_key);
-    const appInfo = {
-      applicationId: response.data.id,
-      privateKeyName,
-    };
-    apps[subaccountApiKey] = appInfo;
-    await saveApps(apps);
-    console.log("Saved apps:", apps);
-    res.json(appInfo);
-  } catch (err) {
-    console.error(
-      "Error creating subaccount app:",
-      err.response?.data || err.message
+    if (
+      !searchResponse.data.numbers ||
+      searchResponse.data.numbers.length === 0
+    ) {
+      return res
+        .status(404)
+        .json({ error: "No available numbers found in the specified country" });
+    }
+
+    const availableNumber = searchResponse.data.numbers[0];
+    console.log("Found available number:", availableNumber);
+
+    // Step 2: Buy the number
+    console.log("Step 2: Purchasing the number...");
+    const buyFormData = new URLSearchParams();
+    buyFormData.append("country", country);
+    buyFormData.append("msisdn", availableNumber.msisdn);
+
+    const buyResponse = await axios.post(
+      "https://rest.nexmo.com/number/buy",
+      buyFormData,
+      {
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
     );
-    res.status(500).json({ error: err.response?.data || err.message });
+
+    console.log("Number purchased successfully:", buyResponse.data);
+
+    res.json({
+      success: true,
+      message: "LVN purchased successfully",
+      data: {
+        purchased_number: availableNumber,
+        purchase_response: buyResponse.data,
+      },
+    });
+  } catch (err) {
+    console.error("Error purchasing LVN:", err.response?.data || err.message);
+    res.status(500).json({
+      error: err.response?.data || err.message,
+      step: err.config?.url?.includes("search") ? "search" : "purchase",
+    });
   }
 });
 
