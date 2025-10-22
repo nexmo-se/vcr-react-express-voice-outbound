@@ -106,35 +106,36 @@ npm install
    }
    ```
 
-5. **Cancel/Release LVN (Optional)**
+5. **Buy LVN (Optional)**
 
-   - If a user no longer needs an LVN, they can select it from the dropdown and click **"Cancel/Release LVN"**.
-   - A confirmation dialog appears asking the user to confirm the action, as it cannot be undone.
-   - The app uses the **subaccount's own credentials** to cancel the number using the Vonage Numbers API.
-   - The country code is automatically detected from the phone number format or prompted from the user if needed.
-   - After successful cancellation, the LVN list is refreshed to remove the cancelled number.
-   - **Note**: Once cancelled, the phone number is permanently released and cannot be recovered.
-
-6. **Buy LVN (Optional)**
-
-   - If a user needs a new phone number, they can click **"Buy LVN"** (located next to Cancel/Release LVN).
+   - If a user needs a new phone number, they can click **"BUY LVN"**.
    - The app prompts for a 2-letter country code (e.g., US, GB, DE) to search for available numbers.
-   - The app searches for available numbers in the specified country using the **subaccount's own credentials**.
-   - The first available number is displayed with pricing information and features.
-   - A confirmation dialog shows the number details including cost per month and supported features (VOICE, SMS, etc.).
-   - Upon confirmation, the number is purchased and automatically added to the LVN list.
-   - The newly purchased number is automatically selected in the dropdown.
-   - **Note**: Purchasing a number will incur monthly charges as shown in the confirmation dialog.
+   - The app automatically searches for and purchases the first available number in the specified country.
+   - Uses the **subaccount's own credentials** for both search and purchase operations.
+   - After successful purchase, the LVN list is refreshed and the newly purchased number is automatically selected.
+   - **Note**: Purchasing a number will incur monthly charges. The cost will be shown in the response data.
 
-7. **Create or Get Subaccount Application and Private Key**
+6. **Create or Get Subaccount Application and LVN Assignment**
 
-   - The user clicks **"Create or Get Subaccount Application"**.
-   - The backend uses the **subaccount's own credentials** to create a new Vonage Application for the subaccount (if one does not exist) and stores the private key using the VCR State Provider.
-   - The Application ID is displayed in the UI.
+   - The user clicks **"CREATE OR GET SUBACCOUNT APPLICATION"**.
+   - The backend uses the **subaccount's own credentials** to create a new Vonage Application (if one doesn't exist) or retrieve an existing one.
+   - **Critical Requirement**: The selected LVN is automatically assigned to the application during this process.
+   - The Application ID is displayed in the UI with a message indicating whether it was "Created" or "Retrieved".
+   - **LVN Linking**: This step links the currently selected LVN to the Voice application, enabling it for outbound calling.
+
+7. **LVN Selection Workflow**
+
+   - **Initial Selection**: After selecting an LVN and creating/getting the application, calls can be made normally.
+   - **Changing LVN**: If a user selects a different LVN from the dropdown:
+     - The **Call button becomes disabled** ⚠️
+     - A warning message appears: "You selected a different LVN. Click 'CREATE OR GET SUBACCOUNT APPLICATION' to link this LVN before making calls."
+     - The user **must** click "CREATE OR GET SUBACCOUNT APPLICATION" again to link the new LVN.
+     - This ensures every LVN is properly assigned to the application before calling.
 
 8. **Make a Call**
 
    - The user enters the destination ("To") number and clicks **"Call"**.
+   - **Prerequisite**: The selected LVN must be linked to the application (see step 7).
    - The app uses the selected LVN as the "from" number and the provided "to" number.
    - The backend uses the subaccount's Application ID and Private Key to authenticate and send the outbound call via the Vonage Voice API.
    - All errors (authentication, no LVNs, call errors) and success responses are displayed in the UI.
@@ -196,6 +197,42 @@ Your backend receives these events at the `/webhooks/event` endpoint, stores the
 
 ---
 
+## New Workflow Requirements (v2.1)
+
+### **LVN-Application Linking Enforcement**
+
+The application now enforces a critical workflow requirement: **every LVN must be explicitly linked to the Voice application before making calls**.
+
+#### **Key Behaviors:**
+
+1. **Initial Flow**: Select LVN → Create/Get App → LVN automatically linked → Call enabled ✅
+2. **LVN Change Flow**:
+   - Select different LVN → **Call button disabled** ❌
+   - Warning displayed: "⚠️ You selected a different LVN. Click 'CREATE OR GET SUBACCOUNT APPLICATION' to link this LVN before making calls."
+   - User must click "CREATE OR GET SUBACCOUNT APPLICATION" → LVN re-linked → Call enabled ✅
+
+#### **Technical Implementation:**
+
+- **One Application Per Subaccount**: Each subaccount uses a single Voice application for all its LVNs
+- **Individual LVN Assignment**: Each LVN is individually assigned to the application using Vonage's `/number/update` API
+- **State Tracking**: Frontend tracks which LVN is currently linked and validates before enabling calls
+- **Automatic Re-assignment**: When different LVN selected, clicking "CREATE OR GET SUBACCOUNT APPLICATION" assigns the new LVN to the existing application
+
+#### **Benefits:**
+
+- **Prevents Call Failures**: Ensures LVNs are properly configured before attempting calls
+- **Clear User Guidance**: Explicit workflow prevents user confusion
+- **API Compliance**: Follows Vonage best practices for number-to-application assignment
+- **Flexible Management**: Users can switch between LVNs while maintaining proper configuration
+
+### **Simplified LVN Management**
+
+- **Single "BUY LVN" Button**: Replaces separate Cancel/Release and Buy LVN functions
+- **Automatic Purchase Flow**: Searches for and buys the first available number in specified country
+- **Streamlined UI**: Cleaner interface with focus on essential operations
+
+---
+
 ## Implementation Notes (v2)
 
 - **Master Account Authentication**: The UI requires authentication with the master API key before accessing any functionality.
@@ -203,12 +240,16 @@ Your backend receives these events at the `/webhooks/event` endpoint, stores the
 - **Direct Subaccount API Access**: All subaccount operations (LVNs, applications, calls) use the subaccount's own credentials following Vonage API best practices.
 - **No Automatic LVN Fetching**: LVNs are fetched only when the user explicitly provides subaccount credentials and clicks "Get Subaccount LVNs".
 - **Credential Validation**: Subaccount credentials are validated during API requests, providing immediate feedback for invalid secrets.
+- **LVN-Application Linking Requirement**: **Critical workflow requirement** - users must click "CREATE OR GET SUBACCOUNT APPLICATION" whenever they select a different LVN to ensure proper assignment before calling.
+- **Call Button Validation**: The Call button is automatically disabled when an LVN is selected that hasn't been linked to the application, with clear warning messages.
+- **Streamlined LVN Management**: Single "BUY LVN" button replaces separate Cancel/Release and Buy buttons, automatically purchasing and assigning numbers.
+- **Enhanced Response Feedback**: Application creation/retrieval responses clearly indicate whether an app was "Created" or "Retrieved" with specific application IDs.
 - **All errors** (authentication, invalid credentials, no LVNs, call errors) are shown in the UI.
 - **Response History**: The UI maintains a history of the last 10 API responses with timestamps and operation labels. Users can expand the history panel to review previous operations and clear the history if needed.
 - **Outbound calls** can only be made by a subaccount's Vonage Application ID and Private Key.
 - **LVN selection**: The first available LVN is selected by default after fetching.
 - **Application persistence**: The backend stores subaccount application info and private key for reuse using the VCR State Provider.
-- **Webhook events**: The backend receives and stores call status updates, and the frontend displays them in real time.
+- **Webhook events**: The backend receives and stores call status updates, and the frontend displays them in real time with improved formatting.
 
 ## VCR State Storage
 
