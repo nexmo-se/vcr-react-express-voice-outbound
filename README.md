@@ -8,8 +8,9 @@ This app demonstrates how to use the Vonage API to make outbound voice calls fro
 - **Subaccount Selection**: View and select from a list of available subaccounts.
 - **Subaccount Credential Input**: Enter subaccount API secret for secure access.
 - **LVN Management**: Fetch LVNs using subaccount's own credentials (following Vonage API best practices).
-- **LVN Cancel/Release**: Cancel or release LVNs that are no longer needed (with confirmation dialog).
-- **LVN Purchase**: Search for and buy new phone numbers for the subaccount with cost preview.
+- **Dual LVN Operations UI**: Separate sections for Release and Transfer operations with clear visual distinction.
+- **LVN Release Section**: Cancel or release LVNs that are no longer needed (with confirmation dialog).
+- **LVN Transfer Section**: Transfer LVNs from master account to target subaccounts using Vonage Subaccounts Transfer API.
 - **Voice Application Management**: Create Vonage Voice Applications using subaccount credentials.
 - **Outbound Calling**: Make outbound calls using the selected LVN as the caller ID.
 - **Real-time Call Status**: View real-time call status updates in the UI (via webhook events).
@@ -40,7 +41,7 @@ You can then use the examples files as reference: `vcr-frontend-sample.yml` and 
 In `backend/vcr-backend.yml`, update the following environment variables:
 
 - `MASTER_API_KEY`: Your Vonage master account API key
-- `MASTER_API_SECRET_KEY`: Your Vonage master account API secret
+- `MASTER_API_SECRET_KEY`: Your Vonage master account API secret (required for LVN transfers)
 - `region` and `application-id` accordingly
 
 Install NPM dependencies in both /backend and /frontend folders:
@@ -52,9 +53,11 @@ npm install
 
 ### To run Locally (vcr debug)
 
-1. Run the Frontend: In terminal, `cd frontend` and `npm start`
+1. Run the Backend Server, in terminal, `cd backend` and `vcr debug -y -f vcr-backend.yml`
 
-2. Run the Backend: In the file ``vcr-frontend.yml` update the `FRONTEND_URL` value, example `http://localhost:3000/`. In another terminal, `cd backend` and `vcr debug -y -f vcr-backend.yml`
+2. Run the Frontend, in terminal, `cd frontend` and `npm start`
+
+3. In the Backend directory, in the file ``vcr-frontend.yml` update the `FRONTEND_URL` value, example `http://localhost:3003/` and rerun the backend server `vcr debug -y -f vcr-backend.yml`
 
 ### To deploy (vcr deploy)
 
@@ -225,11 +228,91 @@ The application now enforces a critical workflow requirement: **every LVN must b
 - **API Compliance**: Follows Vonage best practices for number-to-application assignment
 - **Flexible Management**: Users can switch between LVNs while maintaining proper configuration
 
-### **Simplified LVN Management**
+### **Dual LVN Operations UI (v2.3)**
 
-- **Single "BUY LVN" Button**: Replaces separate Cancel/Release and Buy LVN functions
-- **Automatic Purchase Flow**: Searches for and buys the first available number in specified country
-- **Streamlined UI**: Cleaner interface with focus on essential operations
+The application now features a reorganized UI with two distinct sections for LVN management operations:
+
+#### **🗑️ Release LVN Section**
+
+- **Purpose**: Permanently cancel/release LVNs from the current subaccount
+- **Visual Design**: Red-themed section with error-style coloring for destructive action
+- **Requirements**: Selected LVN + current subaccount credentials
+- **Confirmation**: Double confirmation (country code + confirmation dialog)
+- **Action**: `RELEASE LVN` button removes number from subaccount permanently
+
+#### **↗️ Transfer LVN Section**
+
+- **Purpose**: Transfer LVNs between master account and target subaccounts
+- **Visual Design**: Blue-themed section with primary coloring for transfer action
+- **Requirements**: Selected LVN + target subaccount API key + master credentials
+- **Input Field**: Target Subaccount API Key input within the section
+- **Action**: `TRANSFER LVN` button moves number to specified subaccount
+
+#### **UI Benefits**
+
+- **Clear Separation**: Distinct visual sections prevent operational confusion
+- **Contextual Inputs**: Each section contains only relevant input fields
+- **Color Coding**: Red for destructive (release), Blue for transfer operations
+- **Improved UX**: Users understand the difference between release vs transfer
+- **Organized Layout**: Boxed sections with headers and descriptions
+
+### **Automatic Country Detection (v2.4)**
+
+The application now automatically detects country codes from phone numbers, eliminating the need for manual country code entry:
+
+#### **Supported Countries**
+
+- **United States (US)**: Numbers starting with +1 and US area codes
+- **Canada (CA)**: Numbers starting with +1 and Canadian area codes
+
+#### **Detection Logic**
+
+- **11-digit numbers** starting with "1": Analyzes area code to distinguish US vs Canada
+- **10-digit numbers**: Assumes US format
+- **Fallback**: Defaults to US if format cannot be determined
+
+#### **Benefits**
+
+- **Streamlined UX**: No more country code prompts for users
+- **Automatic Processing**: Backend handles country detection seamlessly
+- **Error Reduction**: Eliminates manual country code entry mistakes
+- **NANP Support**: Full support for North American Numbering Plan (US/Canada)
+
+### **LVN Transfer Functionality (v2.2)**
+
+- **TRANSFER LVN Button**: Replaces BUY LVN functionality with number transfer capabilities
+- **Master-to-Subaccount Transfer**: Transfer existing numbers from master account to target subaccounts
+- **Required Credentials**:
+  - Master API Key (for authentication)
+  - Master API Secret (configured server-side in vcr-backend.yml)
+  - Target Subaccount API Key (destination for the transfer)
+- **Vonage Subaccounts Transfer API**: Uses the official Vonage `/accounts/{api_key}/transfer-number` endpoint
+- **Transfer Workflow**:
+  1. Select an LVN from current subaccount
+  2. Enter target subaccount API key
+  3. Click "TRANSFER LVN" to execute transfer (country auto-detected)
+- **Post-Transfer Actions**:
+
+  - Number is removed from source subaccount
+  - Number appears in target subaccount
+  - Application linking may be required in target subaccount for Voice functionality#### **Transfer Requirements:**
+
+- **Master Account Credentials**: Master API key for authentication, secret configured server-side
+- **LVN Selection**: Must select an existing LVN to transfer
+- **Target Specification**: Target subaccount API key must be provided
+- **Country Auto-Detection**: Country code automatically detected from LVN format
+
+#### **API Integration:**
+
+```javascript
+// Backend endpoint: POST /api/transfer-lvn
+{
+  "masterApiKey": "your-master-api-key",
+  "targetSubaccountApiKey": "target-subaccount-api-key",
+  "selectedLvn": "15551234567",
+  "applicationId": "optional-app-id"
+}
+```
 
 ---
 
@@ -276,6 +359,8 @@ The application uses Vonage Cloud Runtime (VCR) State Provider to persist critic
     }
   }
   ```
+
+````
 
 #### 2. **Private Keys**
 
@@ -330,3 +415,4 @@ This architecture ensures secure, efficient management of Vonage Voice applicati
 4. In the `backend` directory:
    - Ran `vcr init` and created a new app named `vcr-react-backend`.
    - Chose "Starter App" as the VCR application template.
+````

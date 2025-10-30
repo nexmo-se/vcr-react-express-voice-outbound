@@ -437,102 +437,192 @@ app.post("/api/subaccount-app", async (req, res) => {
   res.json(finalAppInfo);
 });
 
-// Purchase/Assign LVN - Search for and buy a new number for a subaccount
-app.post("/api/purchase-assign-lvn", async (req, res) => {
+// Helper function to detect country code from phone number
+function detectCountryFromLvn(phoneNumber) {
+  // Remove any non-digit characters
+  const cleanNumber = phoneNumber.replace(/\D/g, "");
+
+  // US and Canada both use country code +1
+  // US/Canada numbers are 11 digits starting with 1, or 10 digits without the 1
+  if (cleanNumber.length === 11 && cleanNumber.startsWith("1")) {
+    // Check if it's US or Canada based on area code
+    const areaCode = cleanNumber.substring(1, 4);
+    // Canadian area codes (partial list of common ones)
+    const canadianAreaCodes = [
+      "204",
+      "226",
+      "236",
+      "249",
+      "250",
+      "289",
+      "306",
+      "343",
+      "365",
+      "403",
+      "416",
+      "418",
+      "431",
+      "437",
+      "438",
+      "450",
+      "506",
+      "514",
+      "519",
+      "548",
+      "579",
+      "581",
+      "587",
+      "604",
+      "613",
+      "639",
+      "647",
+      "672",
+      "705",
+      "709",
+      "742",
+      "778",
+      "780",
+      "782",
+      "807",
+      "819",
+      "825",
+      "867",
+      "873",
+      "902",
+      "905",
+    ];
+
+    if (canadianAreaCodes.includes(areaCode)) {
+      return "CA";
+    } else {
+      return "US";
+    }
+  } else if (cleanNumber.length === 10) {
+    // Assume US if 10 digits without country code
+    return "US";
+  }
+
+  // Default to US if we can't determine
+  return "US";
+}
+
+// Transfer LVN from source subaccount to target subaccount
+app.post("/api/transfer-lvn", async (req, res) => {
   const {
     masterApiKey,
-    subaccountApiKey,
-    subaccountSecret,
-    country = "US",
+    sourceSubaccountApiKey,
+    targetSubaccountApiKey,
+    selectedLvn,
+    applicationId,
   } = req.body;
+
+  console.log("Transfer LVN request:", {
+    masterApiKey: masterApiKey ? "***" : "missing",
+    sourceSubaccountApiKey: sourceSubaccountApiKey ? "***" : "missing",
+    targetSubaccountApiKey: targetSubaccountApiKey ? "***" : "missing",
+    selectedLvn,
+    applicationId,
+  });
+
   const expectedMasterApiKey = process.env.MASTER_API_KEY;
+  const masterApiSecret = process.env.MASTER_API_SECRET_KEY;
 
   // Verify master API key
   if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
     return res.status(401).json({ error: "Invalid or missing master API key" });
   }
 
-  if (!subaccountApiKey) {
-    return res.status(400).json({ error: "Subaccount API key required" });
+  // Verify master API secret is configured
+  if (!masterApiSecret) {
+    return res
+      .status(500)
+      .json({ error: "Master API secret not configured on server" });
   }
 
-  if (!subaccountSecret) {
-    return res.status(400).json({ error: "Subaccount secret required" });
+  if (!sourceSubaccountApiKey) {
+    return res
+      .status(400)
+      .json({ error: "Source subaccount API key required" });
+  }
+
+  if (!targetSubaccountApiKey) {
+    return res
+      .status(400)
+      .json({ error: "Target subaccount API key required" });
+  }
+
+  if (!selectedLvn) {
+    return res.status(400).json({ error: "LVN required" });
   }
 
   try {
+    // Detect country code from the LVN
+    const detectedCountry = detectCountryFromLvn(selectedLvn);
+
     console.log(
-      `Purchasing and assigning LVN for subaccount: ${subaccountApiKey}`
+      `Transferring LVN ${selectedLvn} from subaccount ${sourceSubaccountApiKey} to subaccount: ${targetSubaccountApiKey}, detected country: ${detectedCountry}`
     );
 
-    // Use the subaccount credentials for authentication
-    const basicAuth = Buffer.from(
-      `${subaccountApiKey}:${subaccountSecret}`
+    // Use the master account credentials for authentication
+    const transferAuth = Buffer.from(
+      `${masterApiKey}:${masterApiSecret}`
     ).toString("base64");
 
-    // Step 1: Search for available numbers
-    console.log("Step 1: Searching for available numbers...");
-    const searchResponse = await axios.get(
-      `https://rest.nexmo.com/number/search?country=${country}&type=mobile-lvn&search_pattern=1&features=SMS,VOICE&size=1`,
+    // Step 1: Transfer the number from source subaccount to target subaccount
+    console.log("Step 1: Transferring number between subaccounts...");
+    const transferResponse = await axios.post(
+      `https://api.nexmo.com/accounts/${masterApiKey}/transfer-number`,
+      {
+        from: sourceSubaccountApiKey,
+        to: targetSubaccountApiKey,
+        number: selectedLvn,
+        country: detectedCountry,
+      },
       {
         headers: {
-          Authorization: `Basic ${basicAuth}`,
+          Authorization: `Basic ${transferAuth}`,
+          "Content-Type": "application/json",
         },
       }
     );
 
-    if (
-      !searchResponse.data.numbers ||
-      searchResponse.data.numbers.length === 0
-    ) {
-      return res
-        .status(404)
-        .json({ error: "No available numbers found in the specified country" });
+    console.log("Number transferred successfully:", transferResponse.data);
+
+    // Step 2: If application ID is provided, note that it needs to be linked separately
+    let responseMessage = `Number ${selectedLvn} successfully transferred to subaccount ${targetSubaccountApiKey}`;
+    if (applicationId) {
+      responseMessage += `. Note: To link with application ${applicationId}, use the target subaccount credentials to update the number.`;
     }
-
-    const availableNumber = searchResponse.data.numbers[0];
-    console.log("Found available number:", availableNumber);
-
-    // Step 2: Buy the number
-    console.log("Step 2: Purchasing the number...");
-    const buyFormData = new URLSearchParams();
-    buyFormData.append("country", country);
-    buyFormData.append("msisdn", availableNumber.msisdn);
-
-    const buyResponse = await axios.post(
-      "https://rest.nexmo.com/number/buy",
-      buyFormData,
-      {
-        headers: {
-          Authorization: `Basic ${basicAuth}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-      }
-    );
-
-    console.log("Number purchased successfully:", buyResponse.data);
 
     res.json({
       success: true,
-      message: "LVN purchased successfully",
+      message: responseMessage,
       data: {
-        purchased_number: availableNumber,
-        purchase_response: buyResponse.data,
+        transfer_details: {
+          number: transferResponse.data.number,
+          country: transferResponse.data.country,
+          from: transferResponse.data.from,
+          to: transferResponse.data.to,
+        },
+        transfer_response: transferResponse.data,
+        application_note: applicationId
+          ? `Application linking required for ${applicationId}`
+          : null,
       },
     });
   } catch (err) {
-    console.error("Error purchasing LVN:", err.response?.data || err.message);
+    console.error("Error transferring LVN:", err.response?.data || err.message);
     res.status(500).json({
       error: err.response?.data || err.message,
-      step: err.config?.url?.includes("search") ? "search" : "purchase",
+      details: err.response?.data?.detail || "Transfer failed",
+      step: "transfer",
     });
   }
 });
 
 // Cancel/Release a number (LVN) for a subaccount
 app.post("/api/cancel-number", async (req, res) => {
-  const { masterApiKey, subaccountApiKey, subaccountSecret, msisdn, country } =
-    req.body;
+  const { masterApiKey, subaccountApiKey, subaccountSecret, msisdn } = req.body;
   const expectedMasterApiKey = process.env.MASTER_API_KEY;
 
   // Verify master API key
@@ -552,13 +642,11 @@ app.post("/api/cancel-number", async (req, res) => {
     return res.status(400).json({ error: "Phone number (msisdn) required" });
   }
 
-  if (!country) {
-    return res.status(400).json({ error: "Country code required" });
-  }
-
   try {
+    // Detect country code from the LVN
+    const detectedCountry = detectCountryFromLvn(msisdn);
     console.log(
-      `Cancelling number ${msisdn} for subaccount: ${subaccountApiKey}`
+      `Cancelling number ${msisdn} for subaccount: ${subaccountApiKey}, detected country: ${detectedCountry}`
     );
 
     // Use the subaccount credentials to cancel the number
@@ -568,7 +656,7 @@ app.post("/api/cancel-number", async (req, res) => {
 
     // Prepare form data for the cancel request
     const formData = new URLSearchParams();
-    formData.append("country", country);
+    formData.append("country", detectedCountry);
     formData.append("msisdn", msisdn);
     // Do NOT include target_api_key when using subaccount credentials directly
 

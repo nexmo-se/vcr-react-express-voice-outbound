@@ -27,6 +27,7 @@ const BACKEND_URL =
 
 function App() {
   const [masterApiKey, setMasterApiKey] = useState("");
+  const [targetSubaccountApiKey, setTargetSubaccountApiKey] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [subaccounts, setSubaccounts] = useState([]);
   const [selectedSubaccount, setSelectedSubaccount] = useState("");
@@ -203,24 +204,25 @@ function App() {
     await fetchLvnsForAccount(selectedSubaccount, subaccountSecret);
   };
 
-  // Cancel/Release the selected LVN
-  // Purchase/Assign LVN - Search for and buy a new number, then assign to application
-  const handlePurchaseAssignLvn = async () => {
-    if (!selectedSubaccount || !subaccountSecret) {
+  // Transfer LVN from master account to target subaccount
+  const handleTransferLvn = async () => {
+    if (!selectedLvn) {
       addResponseToHistory(
         {
-          error: "Please select a subaccount and provide credentials",
+          error: "Please select an LVN to transfer",
         },
-        "Purchase/Assign LVN"
+        "Transfer LVN"
       );
       return;
     }
 
-    // Ask user for country code to search for numbers
-    const country = prompt(
-      "Enter the 2-letter country code to search for numbers (e.g., US, GB, DE):"
-    );
-    if (!country) {
+    if (!targetSubaccountApiKey) {
+      addResponseToHistory(
+        {
+          error: "Please provide target subaccount API key",
+        },
+        "Transfer LVN"
+      );
       return;
     }
 
@@ -228,54 +230,127 @@ function App() {
     setResponse(null);
 
     try {
-      const res = await axios.post(`${BACKEND_URL}/api/purchase-assign-lvn`, {
+      const res = await axios.post(`${BACKEND_URL}/api/transfer-lvn`, {
         masterApiKey,
-        subaccountApiKey: selectedSubaccount,
-        subaccountSecret: subaccountSecret,
-        country: country.toUpperCase(),
+        sourceSubaccountApiKey: selectedSubaccount,
+        targetSubaccountApiKey,
+        selectedLvn,
+        applicationId: appInfo?.application_id,
       });
 
-      const purchasedNumber = res.data.data.purchased_number;
       const successMessage = {
         success: true,
-        message: `LVN ${purchasedNumber.msisdn} has been purchased successfully`,
+        message: res.data.message,
         data: res.data,
       };
 
-      // Refresh the LVNs list to include the new number
-      try {
-        const lvnRes = await axios.post(`${BACKEND_URL}/api/lvns`, {
-          masterApiKey,
-          subaccountApiKey: selectedSubaccount,
-          subaccountSecret: subaccountSecret,
-        });
-        const numbers = lvnRes.data.numbers || [];
-        setLvns(numbers);
-        // Select the newly purchased number
-        if (numbers.length > 0) {
-          const newNumber = numbers.find(
-            (n) => n.msisdn === purchasedNumber.msisdn
-          );
-          if (newNumber) {
-            setSelectedLvn(newNumber.msisdn);
-          } else {
-            setSelectedLvn(numbers[0].msisdn);
-          }
+      // Clear the transferred LVN from current selection
+      setSelectedLvn("");
+      setLvnLinkedToApp(false);
+      setLinkedLvn("");
+
+      // Refresh the LVNs list for current subaccount to remove transferred number
+      if (selectedSubaccount && subaccountSecret) {
+        try {
+          const lvnRes = await axios.post(`${BACKEND_URL}/api/lvns`, {
+            masterApiKey,
+            subaccountApiKey: selectedSubaccount,
+            subaccountSecret: subaccountSecret,
+          });
+          setLvns(lvnRes.data.numbers || []);
+        } catch (refreshErr) {
+          console.log("Error refreshing LVNs after transfer:", refreshErr);
         }
-      } catch (refreshErr) {
-        console.log("Error refreshing LVNs after purchase:", refreshErr);
-        // Don't overwrite the success message even if refresh fails
       }
 
-      // Set the success message after LVN refresh
-      addResponseToHistory(successMessage, "Purchase/Assign LVN");
+      addResponseToHistory(successMessage, "Transfer LVN");
     } catch (err) {
       addResponseToHistory(
         {
           error: err.response?.data?.error || err.message,
-          step: err.response?.data?.step || "unknown",
+          details: err.response?.data?.details || "Transfer failed",
         },
-        "Purchase/Assign LVN"
+        "Transfer LVN"
+      );
+    }
+
+    setPurchaseLoading(false);
+  };
+
+  // Release/Cancel LVN from subaccount
+  const handleReleaseLvn = async () => {
+    if (!selectedLvn) {
+      addResponseToHistory(
+        {
+          error: "Please select an LVN to release",
+        },
+        "Release LVN"
+      );
+      return;
+    }
+
+    if (!selectedSubaccount || !subaccountSecret) {
+      addResponseToHistory(
+        {
+          error: "Please select a subaccount and provide credentials",
+        },
+        "Release LVN"
+      );
+      return;
+    }
+
+    // Confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to release/cancel LVN ${selectedLvn}? This action cannot be undone.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setPurchaseLoading(true);
+    setResponse(null);
+
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/cancel-number`, {
+        masterApiKey,
+        subaccountApiKey: selectedSubaccount,
+        subaccountSecret,
+        msisdn: selectedLvn,
+      });
+
+      const successMessage = {
+        success: true,
+        message: `LVN ${selectedLvn} has been released/cancelled successfully`,
+        data: res.data,
+      };
+
+      // Clear the released LVN from current selection
+      setSelectedLvn("");
+      setLvnLinkedToApp(false);
+      setLinkedLvn("");
+
+      // Refresh the LVNs list to remove released number
+      if (selectedSubaccount && subaccountSecret) {
+        try {
+          const lvnRes = await axios.post(`${BACKEND_URL}/api/lvns`, {
+            masterApiKey,
+            subaccountApiKey: selectedSubaccount,
+            subaccountSecret: subaccountSecret,
+          });
+          setLvns(lvnRes.data.numbers || []);
+        } catch (refreshErr) {
+          console.log("Error refreshing LVNs after release:", refreshErr);
+        }
+      }
+
+      addResponseToHistory(successMessage, "Release LVN");
+    } catch (err) {
+      addResponseToHistory(
+        {
+          error: err.response?.data?.error || err.message,
+          details: err.response?.data?.details || "Release failed",
+        },
+        "Release LVN"
       );
     }
 
@@ -491,17 +566,80 @@ function App() {
                 </Select>
               </FormControl>
 
-              <Box sx={{ mt: 1 }}>
+              {/* Release LVN Section */}
+              <Box
+                sx={{
+                  mt: 3,
+                  p: 2,
+                  border: "1px solid #e0e0e0",
+                  borderRadius: 1,
+                }}
+              >
+                <Typography variant="h6" sx={{ mb: 2, color: "error.main" }}>
+                  🗑️ Release LVN
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ mb: 2, color: "text.secondary" }}
+                >
+                  Permanently release/cancel the selected LVN from this
+                  subaccount
+                </Typography>
                 <Button
                   variant="outlined"
-                  color="primary"
-                  onClick={handlePurchaseAssignLvn}
+                  color="error"
+                  onClick={handleReleaseLvn}
                   disabled={
-                    !selectedSubaccount || !subaccountSecret || purchaseLoading
+                    !selectedLvn ||
+                    !selectedSubaccount ||
+                    !subaccountSecret ||
+                    purchaseLoading
                   }
                   sx={{ width: "100%" }}
                 >
-                  {purchaseLoading ? "Buying..." : "BUY LVN"}
+                  {purchaseLoading ? "Releasing..." : "RELEASE LVN"}
+                </Button>
+              </Box>
+
+              {/* Transfer LVN Section */}
+              <Box
+                sx={{
+                  mt: 3,
+                  p: 2,
+                  border: "1px solid #e0e0e0",
+                  borderRadius: 1,
+                }}
+              >
+                <Typography variant="h6" sx={{ mb: 2, color: "primary.main" }}>
+                  ↗️ Transfer LVN
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ mb: 2, color: "text.secondary" }}
+                >
+                  Transfer the selected LVN to another subaccount
+                </Typography>
+                <TextField
+                  label="Target Subaccount API Key"
+                  value={targetSubaccountApiKey}
+                  onChange={(e) => setTargetSubaccountApiKey(e.target.value)}
+                  variant="outlined"
+                  autoComplete="off"
+                  type="password"
+                  helperText="API key of the subaccount to transfer the LVN to"
+                  fullWidth
+                  sx={{ mb: 2 }}
+                />
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  onClick={handleTransferLvn}
+                  disabled={
+                    !selectedLvn || !targetSubaccountApiKey || purchaseLoading
+                  }
+                  sx={{ width: "100%" }}
+                >
+                  {purchaseLoading ? "Transferring..." : "TRANSFER LVN"}
                 </Button>
               </Box>
 
