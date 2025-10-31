@@ -881,6 +881,45 @@ app.post("/api/call", async (req, res) => {
   }
 });
 
+// Clear all VCR state - reset application to clean slate
+app.post("/api/clear-state", async (req, res) => {
+  try {
+    console.log("Clearing all VCR state...");
+
+    // Clear subaccount apps
+    await state.set("subaccount_apps", JSON.stringify({}));
+
+    // Get all stored apps to find private key names to clear
+    const apps = await loadApps();
+    const privateKeyPromises = [];
+
+    // Clear all private keys stored for subaccounts
+    for (const [subaccountApiKey, appData] of Object.entries(apps)) {
+      if (appData && appData.applicationId) {
+        const keyName = `private_key_${subaccountApiKey}_${appData.applicationId}`;
+        privateKeyPromises.push(state.set(keyName, null));
+        console.log(`Clearing private key: ${keyName}`);
+      }
+    }
+
+    // Wait for all private key clearing operations to complete
+    await Promise.all(privateKeyPromises);
+
+    console.log("VCR state cleared successfully");
+    res.json({
+      success: true,
+      message:
+        "All VCR state cleared successfully. Application reset to clean slate.",
+    });
+  } catch (error) {
+    console.error("Error clearing VCR state:", error);
+    res.status(500).json({
+      error: "Failed to clear VCR state",
+      details: error.message,
+    });
+  }
+});
+
 app.listen(port, () => {
   console.log(`App listening on port ${port}`);
 });

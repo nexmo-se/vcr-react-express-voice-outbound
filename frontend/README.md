@@ -24,12 +24,12 @@ To run Locally (vcr debug):
 
 To deploy (vcr deploy):
 
-1. Deploy the Backend: `cd backend` and then `vcr deploy`
+1. Deploy the Backend: `cd backend` and then `vcr deploy -f vcr-backend.yml`
 
 2. Deploy the Frontend:
-   1. Update in /frontend/App.js `BACKEND_URL` to your VCR Backend URL.
-   2. Update in /backend/vcr.yml `FRONTEND_URL` to your VCR Frontend URL. You can deploy frontend twice to retrieve it. There's probably a smarter way to do this.
-   3. Then `cd frontend` and `vcr deploy`
+   1. Update the value `BACKEND_URL` in the file `/frontend/App.js` to your VCR Backend URL.
+   2. Update the value `FRONTEND_URL` in the file `/backend/vcr.yml` to your VCR Frontend URL. You can deploy frontend twice to retrieve it. There's probably a smarter way to do this.
+   3. Then `cd frontend` and `vcr deploy -f vcr-frontend.yml`
 
 ## Application Flow
 
