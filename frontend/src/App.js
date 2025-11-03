@@ -538,7 +538,6 @@ function App() {
                 value={subaccountSecret}
                 onChange={(e) => setSubaccountSecret(e.target.value)}
                 variant="outlined"
-                type="password"
                 autoComplete="off"
                 helperText="Enter the API secret for the selected subaccount"
               />
@@ -625,7 +624,6 @@ function App() {
                   onChange={(e) => setTargetSubaccountApiKey(e.target.value)}
                   variant="outlined"
                   autoComplete="off"
-                  type="password"
                   helperText="API key of the subaccount to transfer the LVN to"
                   fullWidth
                   sx={{ mb: 2 }}
