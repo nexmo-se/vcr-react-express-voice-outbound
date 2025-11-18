@@ -19,7 +19,7 @@ You should run `vcr init` in both folders. This will allow you to create Vonage 
 
 To run Locally (vcr debug):
 
-1. Run the Backend: In another terminal, `cd backend` and `vcr debug -y`
+1. Run the Backend: In another terminal, `cd backend` and `vcr debug -y -f vcr-backend.yml`
 2. Run the Frontend: In terminal, `cd frontend` and `npm start`
 
 To deploy (vcr deploy):

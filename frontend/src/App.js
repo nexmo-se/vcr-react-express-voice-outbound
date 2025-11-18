@@ -277,86 +277,6 @@ function App() {
     setPurchaseLoading(false);
   };
 
-  // Release/Cancel LVN from subaccount
-  const handleReleaseLvn = async () => {
-    if (!selectedLvn) {
-      addResponseToHistory(
-        {
-          error: "Please select an LVN to release",
-        },
-        "Release LVN"
-      );
-      return;
-    }
-
-    if (!selectedSubaccount || !subaccountSecret) {
-      addResponseToHistory(
-        {
-          error: "Please select a subaccount and provide credentials",
-        },
-        "Release LVN"
-      );
-      return;
-    }
-
-    // Confirmation dialog
-    const confirmed = window.confirm(
-      `Are you sure you want to release/cancel LVN ${selectedLvn}? This action cannot be undone.`
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setPurchaseLoading(true);
-    setResponse(null);
-
-    try {
-      const res = await axios.post(`${BACKEND_URL}/api/cancel-number`, {
-        masterApiKey,
-        subaccountApiKey: selectedSubaccount,
-        subaccountSecret,
-        msisdn: selectedLvn,
-      });
-
-      const successMessage = {
-        success: true,
-        message: `LVN ${selectedLvn} has been released/cancelled successfully`,
-        data: res.data,
-      };
-
-      // Clear the released LVN from current selection
-      setSelectedLvn("");
-      setLvnLinkedToApp(false);
-      setLinkedLvn("");
-
-      // Refresh the LVNs list to remove released number
-      if (selectedSubaccount && subaccountSecret) {
-        try {
-          const lvnRes = await axios.post(`${BACKEND_URL}/api/lvns`, {
-            masterApiKey,
-            subaccountApiKey: selectedSubaccount,
-            subaccountSecret: subaccountSecret,
-          });
-          setLvns(lvnRes.data.numbers || []);
-        } catch (refreshErr) {
-          console.log("Error refreshing LVNs after release:", refreshErr);
-        }
-      }
-
-      addResponseToHistory(successMessage, "Release LVN");
-    } catch (err) {
-      addResponseToHistory(
-        {
-          error: err.response?.data?.error || err.message,
-          details: err.response?.data?.details || "Release failed",
-        },
-        "Release LVN"
-      );
-    }
-
-    setPurchaseLoading(false);
-  };
-
   // Create or get subaccount application and assign LVN
   const handleGetOrCreateApp = async () => {
     setAppInfo(null);
@@ -564,41 +484,6 @@ function App() {
                   ))}
                 </Select>
               </FormControl>
-
-              {/* Release LVN Section */}
-              <Box
-                sx={{
-                  mt: 3,
-                  p: 2,
-                  border: "1px solid #e0e0e0",
-                  borderRadius: 1,
-                }}
-              >
-                <Typography variant="h6" sx={{ mb: 2, color: "error.main" }}>
-                  🗑️ Release LVN
-                </Typography>
-                <Typography
-                  variant="body2"
-                  sx={{ mb: 2, color: "text.secondary" }}
-                >
-                  Permanently release/cancel the selected LVN from this
-                  subaccount
-                </Typography>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  onClick={handleReleaseLvn}
-                  disabled={
-                    !selectedLvn ||
-                    !selectedSubaccount ||
-                    !subaccountSecret ||
-                    purchaseLoading
-                  }
-                  sx={{ width: "100%" }}
-                >
-                  {purchaseLoading ? "Releasing..." : "RELEASE LVN"}
-                </Button>
-              </Box>
 
               {/* Transfer LVN Section */}
               <Box
