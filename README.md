@@ -1,4 +1,4 @@
-# Vonage Subaccount LVN Outbound Call Demo (v2)
+# Vonage Subaccount LVN Outbound Call Demo (v3)
 
 This app demonstrates how to use the Vonage API to make outbound voice calls from a subaccount's LVN (Long Virtual Number) using proper subaccount credentials.
 
@@ -6,15 +6,16 @@ This app demonstrates how to use the Vonage API to make outbound voice calls fro
 
 - **Master Account Authentication**: Authenticate using the master API key for account admin access.
 - **Subaccount Selection**: View and select from a list of available subaccounts.
-- **Subaccount Credential Input**: Enter subaccount API secret for secure access.
+- **Automatic Secret Management**: Automatically manages subaccount API secrets with rotation support.
 - **LVN Management**: Fetch LVNs using subaccount's own credentials (following Vonage API best practices).
 - **Dual LVN Operations UI**: Separate sections for Release and Transfer operations with clear visual distinction.
-- **LVN Release Section**: Cancel or release LVNs that are no longer needed (with confirmation dialog).
 - **LVN Transfer Section**: Transfer LVNs from master account to target subaccounts using Vonage Subaccounts Transfer API.
-- **Voice Application Management**: Create Vonage Voice Applications using subaccount credentials.
+- **Voice Application Management**: Create Vonage Voice Applications using subaccount credentials with automatic LVN linking.
+- **LVN Re-linking Detection**: Automatically detects when an LVN is linked to an existing app and provides rollback capability.
 - **Outbound Calling**: Make outbound calls using the selected LVN as the caller ID.
 - **Real-time Call Status**: View real-time call status updates in the UI (via webhook events).
 - **Response History**: Track and review previous API responses with collapsible history panel.
+- **Settings Management**: Advanced settings panel for viewing and managing VCR state and Vonage applications.
 - **Error Handling**: View API responses and errors in the UI.
 
 ## Debug or Deploy VCR App
@@ -175,6 +176,47 @@ Your backend receives these events at the `/webhooks/event` endpoint, stores the
 ```
 
 ---
+
+---
+
+## Version 3 New Features
+
+### **Settings Management Panel**
+
+- **Settings Cog Icon**: Accessible from the top-right corner after authentication
+- **VCR State Viewer**: View all cached application data and private keys stored in VCR State Provider
+- **Vonage Applications Manager**: 
+  - View all Vonage applications for the selected subaccount
+  - Display applications in organized cards with app ID, name, and webhook URLs
+  - Delete applications matching the naming convention with automatic state cleanup
+- **State Management Actions**:
+  - **View All State**: Inspect VCR cached data (applications and private keys)
+  - **Delete All State**: Clear VCR cache for fresh start
+  - **View All Apps**: Fetch and display actual Vonage applications from API
+  - **Delete All Apps**: Remove applications and automatically clear related VCR state
+
+### **Automatic Secret Management**
+
+- **Secret Generation**: Automatically generates secure API secrets for subaccounts
+- **Secret Rotation**: Smart rotation system that maintains 2 secrets max, deleting oldest when creating new ones
+- **Secret Caching**: Caches secrets per subaccount to avoid unnecessary rotation
+- **Seamless UX**: Users no longer need to manually enter subaccount secrets
+
+### **LVN Re-linking Intelligence**
+
+- **Previous App Detection**: Detects when an LVN is already linked to another application
+- **Warning Alerts**: Displays clear warning showing which app was unlinked
+- **Link Back Functionality**: 
+  - New "Link LVN Back to Existing App" section appears when re-linking occurs
+  - Shows previous application ID and LVN details
+  - One-click restoration to previous app with "Link LVN Back to App" button
+- **Transparency**: Full visibility into LVN-to-app relationships and changes
+
+### **Synchronized State Management**
+
+- **Automatic State Cleanup**: When deleting Vonage applications, VCR state is automatically cleared
+- **Consistency Enforcement**: Ensures cached state matches actual Vonage resources
+- **No Orphaned Data**: Private keys and application mappings are cleaned up together
 
 ---
 

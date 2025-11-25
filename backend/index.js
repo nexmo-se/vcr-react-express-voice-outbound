@@ -217,6 +217,281 @@ app.get("/api/call-status", (req, res) => {
   res.json(callEvents[uuid] || {});
 });
 
+// Generate a random secret that meets Vonage requirements
+// Requirements: 8-25 characters, at least 1 lowercase, 1 uppercase, 1 digit
+function generateSecret() {
+  const lowercase = "abcdefghijklmnopqrstuvwxyz";
+  const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const digits = "0123456789";
+  const specialChars = "!@#$%^&*";
+  const allChars = lowercase + uppercase + digits + specialChars;
+
+  // Ensure at least one of each required character type
+  let secret = "";
+  secret += lowercase.charAt(Math.floor(Math.random() * lowercase.length));
+  secret += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
+  secret += digits.charAt(Math.floor(Math.random() * digits.length));
+
+  // Fill the rest randomly (total length: 16 characters)
+  for (let i = 3; i < 16; i++) {
+    secret += allChars.charAt(Math.floor(Math.random() * allChars.length));
+  }
+
+  // Shuffle the secret to randomize the position of required characters
+  secret = secret
+    .split("")
+    .sort(() => Math.random() - 0.5)
+    .join("");
+
+  return secret;
+}
+
+// Manage subaccount secrets automatically
+app.post("/api/manage-secret", async (req, res) => {
+  const { masterApiKey, subaccountApiKey } = req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+  const masterApiSecret = process.env.MASTER_API_SECRET_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  if (!masterApiSecret) {
+    return res.status(500).json({ error: "Master API secret not configured" });
+  }
+
+  if (!subaccountApiKey) {
+    return res.status(400).json({ error: "Subaccount API key required" });
+  }
+
+  try {
+    const basicAuth = Buffer.from(
+      `${expectedMasterApiKey}:${masterApiSecret}`
+    ).toString("base64");
+
+    // Step 1: Get all secrets for the subaccount
+    console.log(`Fetching secrets for subaccount: ${subaccountApiKey}`);
+    const secretsResponse = await axios.get(
+      `https://api.nexmo.com/accounts/${subaccountApiKey}/secrets`,
+      {
+        headers: {
+          Authorization: `Basic ${basicAuth}`,
+        },
+      }
+    );
+
+    const secrets = secretsResponse.data._embedded?.secrets || [];
+    console.log(
+      `Found ${secrets.length} secret(s) for subaccount ${subaccountApiKey}`
+    );
+
+    let secret; // The secret to return
+    let secretId;
+    let message;
+
+    // Step 2: Check the number of secrets
+    if (secrets.length >= 2) {
+      // If 2 secrets exist, delete the oldest one and create a new one
+      const sortedSecrets = secrets.sort(
+        (a, b) => new Date(a.created_at) - new Date(b.created_at)
+      );
+      const oldestSecret = sortedSecrets[0];
+
+      console.log(`Deleting oldest secret: ${oldestSecret.id}`);
+      await axios.delete(
+        `https://api.nexmo.com/accounts/${subaccountApiKey}/secrets/${oldestSecret.id}`,
+        {
+          headers: {
+            Authorization: `Basic ${basicAuth}`,
+          },
+        }
+      );
+      console.log(`Successfully deleted secret: ${oldestSecret.id}`);
+
+      // Create a new secret
+      secret = generateSecret();
+      console.log(`Creating new secret for subaccount: ${subaccountApiKey}`);
+      const createResponse = await axios.post(
+        `https://api.nexmo.com/accounts/${subaccountApiKey}/secrets`,
+        {
+          secret: secret,
+        },
+        {
+          headers: {
+            Authorization: `Basic ${basicAuth}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      secretId = createResponse.data.id;
+      message = "Rotated secret (deleted oldest, created new)";
+      console.log(`Successfully created new secret with ID: ${secretId}`);
+    } else if (secrets.length === 1) {
+      // If only 1 secret exists, create a new one
+      secret = generateSecret();
+      console.log(`Creating new secret for subaccount: ${subaccountApiKey}`);
+      const createResponse = await axios.post(
+        `https://api.nexmo.com/accounts/${subaccountApiKey}/secrets`,
+        {
+          secret: secret,
+        },
+        {
+          headers: {
+            Authorization: `Basic ${basicAuth}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      secretId = createResponse.data.id;
+      message = "Created new secret (now has 2 secrets)";
+      console.log(`Successfully created new secret with ID: ${secretId}`);
+    } else {
+      // If 0 secrets (shouldn't happen, but handle it)
+      secret = generateSecret();
+      console.log(`Creating first secret for subaccount: ${subaccountApiKey}`);
+      const createResponse = await axios.post(
+        `https://api.nexmo.com/accounts/${subaccountApiKey}/secrets`,
+        {
+          secret: secret,
+        },
+        {
+          headers: {
+            Authorization: `Basic ${basicAuth}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      secretId = createResponse.data.id;
+      message = "Created first secret";
+      console.log(`Successfully created new secret with ID: ${secretId}`);
+    }
+
+    // Return the secret info to the frontend
+    res.json({
+      success: true,
+      secret: secret,
+      secretId: secretId,
+      message: message,
+    });
+  } catch (err) {
+    console.error(
+      "Error managing subaccount secret:",
+      err.response?.data || err.message
+    );
+    res.status(500).json({
+      error: err.response?.data || err.message,
+      details: "Failed to manage subaccount secret",
+    });
+  }
+});
+
+// Get specific LVN details including app link
+app.post("/api/get-lvn-details", async (req, res) => {
+  const { masterApiKey, subaccountApiKey, subaccountSecret, msisdn } = req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  if (!subaccountApiKey) {
+    return res.status(400).json({ error: "Subaccount API key required" });
+  }
+
+  if (!subaccountSecret) {
+    return res.status(400).json({ error: "Subaccount secret required" });
+  }
+
+  if (!msisdn) {
+    return res.status(400).json({ error: "Phone number (msisdn) required" });
+  }
+
+  try {
+    console.log(`Fetching details for LVN: ${msisdn}`);
+
+    const basicAuth = Buffer.from(
+      `${subaccountApiKey}:${subaccountSecret}`
+    ).toString("base64");
+
+    // Get all numbers and find the specific one
+    const lvnResponse = await axios.get(
+      "https://rest.nexmo.com/account/numbers",
+      {
+        headers: { Authorization: `Basic ${basicAuth}` },
+      }
+    );
+
+    const numbers = lvnResponse.data.numbers || [];
+    const lvnDetails = numbers.find((num) => num.msisdn === msisdn);
+
+    if (!lvnDetails) {
+      return res.status(404).json({ error: "LVN not found" });
+    }
+
+    console.log(`LVN details:`, lvnDetails);
+    res.json(lvnDetails);
+  } catch (err) {
+    console.error(
+      "Error fetching LVN details:",
+      err.response?.data || err.message
+    );
+    res.status(500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// Link LVN to a specific application
+app.post("/api/link-lvn-to-app", async (req, res) => {
+  const {
+    masterApiKey,
+    subaccountApiKey,
+    subaccountSecret,
+    msisdn,
+    applicationId,
+  } = req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  if (!subaccountApiKey || !subaccountSecret || !msisdn || !applicationId) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    console.log(`Linking LVN ${msisdn} to application ${applicationId}`);
+
+    const detectedCountry = detectCountryFromLvn(msisdn);
+    const assignFormData = new URLSearchParams();
+    assignFormData.append("country", detectedCountry);
+    assignFormData.append("msisdn", msisdn);
+    assignFormData.append("app_id", applicationId);
+
+    const assignResponse = await axios.post(
+      `https://rest.nexmo.com/number/update?api_key=${subaccountApiKey}&api_secret=${subaccountSecret}`,
+      assignFormData,
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
+
+    console.log("LVN linked successfully:", assignResponse.data);
+    res.json({
+      success: true,
+      message: `LVN ${msisdn} linked to application ${applicationId}`,
+      data: assignResponse.data,
+    });
+  } catch (err) {
+    console.error("Error linking LVN:", err.response?.data || err.message);
+    res.status(500).json({ error: err.response?.data || err.message });
+  }
+});
+
 // List LVNs for a selected subaccount
 app.post("/api/lvns", async (req, res) => {
   const { masterApiKey, subaccountApiKey, subaccountSecret } = req.body;
@@ -372,20 +647,56 @@ app.post("/api/subaccount-app", async (req, res) => {
 
   // LVN Assignment Logic (for both existing and new applications)
   let lvnAssignmentResult = null;
+  let previousAppInfo = null;
 
   if (selectedLvn) {
     try {
-      console.log(
-        `Assigning LVN ${selectedLvn} to application ${appInfo.applicationId}`
-      );
-
-      // Use subaccount credentials to assign LVN to app
+      // First, check if LVN is already linked to another app
       const basicAuth = Buffer.from(
         `${subaccountApiKey}:${subaccountSecret}`
       ).toString("base64");
 
+      const lvnResponse = await axios.get(
+        "https://rest.nexmo.com/account/numbers",
+        {
+          headers: { Authorization: `Basic ${basicAuth}` },
+        }
+      );
+
+      const numbers = lvnResponse.data.numbers || [];
+      const currentLvnDetails = numbers.find(
+        (num) => num.msisdn === selectedLvn
+      );
+
+      // Store previous app info if it exists and is different
+      if (
+        currentLvnDetails &&
+        currentLvnDetails.voiceCallbackType === "app" &&
+        currentLvnDetails.voiceCallbackValue &&
+        currentLvnDetails.voiceCallbackValue !== appInfo.applicationId
+      ) {
+        previousAppInfo = {
+          applicationId: currentLvnDetails.voiceCallbackValue,
+          msisdn: selectedLvn,
+        };
+        console.log(
+          `LVN ${selectedLvn} is currently linked to app ${previousAppInfo.applicationId}`
+        );
+      }
+
+      console.log(
+        `Assigning LVN ${selectedLvn} to application ${appInfo.applicationId}`
+      );
+
+      // Detect country code from the LVN
+      const detectedCountry = detectCountryFromLvn(selectedLvn);
+      console.log(
+        `Detected country for LVN ${selectedLvn}: ${detectedCountry}`
+      );
+
+      // Use subaccount credentials via URL parameters (not Basic Auth header)
       const assignFormData = new URLSearchParams();
-      assignFormData.append("country", "US"); // Default to US, could be made configurable
+      assignFormData.append("country", detectedCountry);
       assignFormData.append("msisdn", selectedLvn);
       assignFormData.append("app_id", appInfo.applicationId);
 
@@ -394,7 +705,6 @@ app.post("/api/subaccount-app", async (req, res) => {
         assignFormData,
         {
           headers: {
-            Authorization: `Basic ${basicAuth}`,
             "Content-Type": "application/x-www-form-urlencoded",
           },
         }
@@ -405,6 +715,7 @@ app.post("/api/subaccount-app", async (req, res) => {
         success: true,
         message: `LVN ${selectedLvn} assigned to application`,
         data: assignResponse.data,
+        previousApp: previousAppInfo,
       };
     } catch (assignErr) {
       console.error(
@@ -881,8 +1192,253 @@ app.post("/api/call", async (req, res) => {
   }
 });
 
+// List all Vonage applications for a subaccount
+app.post("/api/list-applications", async (req, res) => {
+  const { masterApiKey, subaccountApiKey, subaccountSecret } = req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  if (!subaccountApiKey) {
+    return res.status(400).json({ error: "Subaccount API key required" });
+  }
+
+  if (!subaccountSecret) {
+    return res.status(400).json({ error: "Subaccount secret required" });
+  }
+
+  try {
+    console.log(
+      `Fetching all applications for subaccount: ${subaccountApiKey}`
+    );
+
+    const response = await axios.get("https://api.nexmo.com/v2/applications", {
+      auth: {
+        username: subaccountApiKey,
+        password: subaccountSecret,
+      },
+    });
+
+    console.log(
+      `Found ${response.data._embedded?.applications?.length || 0} applications`
+    );
+
+    // Log the first application to see available fields
+    if (response.data._embedded?.applications?.length > 0) {
+      console.log(
+        "Sample application fields:",
+        Object.keys(response.data._embedded.applications[0])
+      );
+      console.log(
+        "First application:",
+        JSON.stringify(response.data._embedded.applications[0], null, 2)
+      );
+    }
+
+    res.json(response.data);
+  } catch (err) {
+    console.error(
+      "Error fetching applications:",
+      err.response?.data || err.message
+    );
+    res.status(500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// Delete all Vonage applications for a subaccount
+app.post("/api/delete-all-applications", async (req, res) => {
+  const { masterApiKey, subaccountApiKey, subaccountSecret } = req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  if (!subaccountApiKey) {
+    return res.status(400).json({ error: "Subaccount API key required" });
+  }
+
+  if (!subaccountSecret) {
+    return res.status(400).json({ error: "Subaccount secret required" });
+  }
+
+  try {
+    console.log(
+      `Deleting all applications for subaccount: ${subaccountApiKey}`
+    );
+
+    // First, list all applications
+    const listResponse = await axios.get(
+      "https://api.nexmo.com/v2/applications",
+      {
+        auth: {
+          username: subaccountApiKey,
+          password: subaccountSecret,
+        },
+      }
+    );
+
+    const applications = listResponse.data._embedded?.applications || [];
+    console.log(`Found ${applications.length} applications total`);
+
+    // Filter applications to only include those matching the naming convention
+    const expectedAppName = `subaccount-app-${subaccountApiKey}`;
+    const applicationsToDelete = applications.filter(
+      (app) => app.name === expectedAppName
+    );
+
+    console.log(
+      `Found ${applicationsToDelete.length} applications matching naming convention "${expectedAppName}"`
+    );
+
+    if (applicationsToDelete.length === 0) {
+      return res.json({
+        success: true,
+        message: `No applications found with name "${expectedAppName}"`,
+        deleted: 0,
+        skipped: applications.length,
+      });
+    }
+
+    // Delete each matching application
+    const deletePromises = applicationsToDelete.map((app) =>
+      axios
+        .delete(`https://api.nexmo.com/v2/applications/${app.id}`, {
+          auth: {
+            username: subaccountApiKey,
+            password: subaccountSecret,
+          },
+        })
+        .then(() => {
+          console.log(`Deleted application: ${app.id} (${app.name})`);
+          return { id: app.id, name: app.name, success: true };
+        })
+        .catch((err) => {
+          console.error(
+            `Failed to delete application ${app.id} (${app.name}):`,
+            err.message
+          );
+          return {
+            id: app.id,
+            name: app.name,
+            success: false,
+            error: err.message,
+          };
+        })
+    );
+
+    const results = await Promise.all(deletePromises);
+    const successCount = results.filter((r) => r.success).length;
+    const failCount = results.filter((r) => !r.success).length;
+    const skippedCount = applications.length - applicationsToDelete.length;
+
+    console.log(
+      `Deleted ${successCount} applications, ${failCount} failed, ${skippedCount} skipped (wrong name)`
+    );
+
+    // If apps were successfully deleted, also clear VCR state for this subaccount
+    if (successCount > 0) {
+      try {
+        console.log(`Clearing VCR state for subaccount: ${subaccountApiKey}`);
+        const apps = await loadApps();
+
+        // Get the app info for this subaccount
+        const subaccountApp = apps[subaccountApiKey];
+
+        if (subaccountApp) {
+          // Clear the private key if it exists
+          if (subaccountApp.privateKeyName) {
+            await state.set(subaccountApp.privateKeyName, null);
+            console.log(`Cleared private key: ${subaccountApp.privateKeyName}`);
+          }
+
+          // Remove this subaccount from stored apps
+          delete apps[subaccountApiKey];
+          await saveApps(apps);
+          console.log(`Cleared VCR state for subaccount: ${subaccountApiKey}`);
+        }
+      } catch (stateErr) {
+        console.error("Error clearing VCR state:", stateErr);
+        // Don't fail the request if state clearing fails
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Deleted ${successCount} application(s) matching "${expectedAppName}" and cleared VCR state`,
+      deleted: successCount,
+      failed: failCount,
+      skipped: skippedCount,
+      results: results,
+      stateCleared: successCount > 0,
+    });
+  } catch (err) {
+    console.error(
+      "Error deleting applications:",
+      err.response?.data || err.message
+    );
+    res.status(500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// Get VCR state - retrieve all stored apps and private keys
+app.post("/api/get-vcr-state", async (req, res) => {
+  const { masterApiKey } = req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
+  try {
+    console.log("Fetching VCR state...");
+
+    // Get all stored apps
+    const apps = await loadApps();
+
+    // Get list of all private key names stored
+    const privateKeyNames = [];
+    for (const [subaccountApiKey, appData] of Object.entries(apps)) {
+      if (appData.privateKeyName) {
+        privateKeyNames.push(appData.privateKeyName);
+      }
+    }
+
+    const stateData = {
+      apps: apps,
+      privateKeys: privateKeyNames,
+      count: {
+        applications: Object.keys(apps).length,
+        privateKeys: privateKeyNames.length,
+      },
+    };
+
+    console.log("VCR state retrieved successfully:", stateData.count);
+    res.json(stateData);
+  } catch (error) {
+    console.error("Error fetching VCR state:", error);
+    res.status(500).json({
+      error: "Failed to fetch VCR state",
+      details: error.message,
+    });
+  }
+});
+
 // Clear all VCR state - reset application to clean slate
 app.post("/api/clear-state", async (req, res) => {
+  const { masterApiKey } = req.body;
+  const expectedMasterApiKey = process.env.MASTER_API_KEY;
+
+  // Verify master API key
+  if (!masterApiKey || masterApiKey !== expectedMasterApiKey) {
+    return res.status(401).json({ error: "Invalid or missing master API key" });
+  }
+
   try {
     console.log("Clearing all VCR state...");
 

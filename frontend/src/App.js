@@ -16,8 +16,15 @@ import {
   AccordionDetails,
   Chip,
   Divider,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Alert,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import SettingsIcon from "@mui/icons-material/Settings";
 import "./App.css";
 
 const BACKEND_URL =
@@ -32,6 +39,8 @@ function App() {
   const [subaccounts, setSubaccounts] = useState([]);
   const [selectedSubaccount, setSelectedSubaccount] = useState("");
   const [subaccountSecret, setSubaccountSecret] = useState("");
+  const [secretCache, setSecretCache] = useState({}); // Cache secrets per subaccount to avoid rotation on every switch
+  const [secretLoading, setSecretLoading] = useState(false);
   const [lvns, setLvns] = useState([]);
   const [selectedLvn, setSelectedLvn] = useState("");
   const [to, setTo] = useState("");
@@ -47,6 +56,15 @@ function App() {
   const [callUuid, setCallUuid] = useState("");
   const [callStatus, setCallStatus] = useState(null);
   const pollActiveRef = useRef(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [vcrState, setVcrState] = useState(null);
+  const [stateLoading, setStateLoading] = useState(false);
+  const [clearingState, setClearingState] = useState(false);
+  const [vonageApps, setVonageApps] = useState(null);
+  const [appsLoading, setAppsLoading] = useState(false);
+  const [deletingApps, setDeletingApps] = useState(false);
+  const [previousApp, setPreviousApp] = useState(null);
+  const [linkingBack, setLinkingBack] = useState(false);
 
   // Helper function to add response to history and set current response
   const addResponseToHistory = (newResponse, operation = "API Operation") => {
@@ -63,7 +81,51 @@ function App() {
     setResponse(newResponse);
   };
 
-  // Authenticate with master API key
+  // Manage subaccount secret automatically
+  const handleManageSecret = async (subaccountApiKey) => {
+    // Check if we already have a cached secret for this subaccount
+    if (secretCache[subaccountApiKey]) {
+      console.log(`Using cached secret for subaccount: ${subaccountApiKey}`);
+      setSubaccountSecret(secretCache[subaccountApiKey]);
+      return secretCache[subaccountApiKey];
+    }
+
+    setSecretLoading(true);
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/manage-secret`, {
+        masterApiKey,
+        subaccountApiKey,
+      });
+
+      // Store the generated secret
+      setSubaccountSecret(res.data.secret);
+
+      // Cache the secret for this subaccount
+      setSecretCache((prev) => ({
+        ...prev,
+        [subaccountApiKey]: res.data.secret,
+      }));
+
+      addResponseToHistory(
+        {
+          success: true,
+          message: res.data.message,
+          secretId: res.data.secretId,
+        },
+        "Manage Secret"
+      );
+
+      return res.data.secret;
+    } catch (err) {
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Manage Secret"
+      );
+      return null;
+    } finally {
+      setSecretLoading(false);
+    }
+  }; // Authenticate with master API key
   const handleAuthenticate = async () => {
     setAuthLoading(true);
     setResponse(null);
@@ -129,7 +191,12 @@ function App() {
 
       if (defaultAccount) {
         setSelectedSubaccount(defaultAccount);
-        // User will need to provide subaccount secret manually to fetch LVNs
+        // Automatically manage secret for the default subaccount
+        const secret = await handleManageSecret(defaultAccount);
+        if (secret) {
+          // Fetch LVNs with automatic retry on 401
+          await fetchLvnsForAccount(defaultAccount, secret);
+        }
       }
 
       addResponseToHistory(
@@ -147,7 +214,11 @@ function App() {
   };
 
   // Fetch LVNs for a specific account with provided secret
-  const fetchLvnsForAccount = async (accountApiKey, accountSecret) => {
+  const fetchLvnsForAccount = async (
+    accountApiKey,
+    accountSecret,
+    retryCount = 0
+  ) => {
     if (!accountSecret) {
       addResponseToHistory(
         { error: "Subaccount secret is required to fetch LVNs." },
@@ -192,16 +263,30 @@ function App() {
         );
       }
     } catch (err) {
+      // If 401 error (secret not propagated yet) and we haven't exceeded retry limit
+      if (err.response?.status === 401 && retryCount < 3) {
+        const delay = (retryCount + 1) * 3000; // 3s, 6s, 9s
+        addResponseToHistory(
+          {
+            message: `Secret still propagating, retrying in ${
+              delay / 1000
+            } seconds... (attempt ${retryCount + 1}/3)`,
+          },
+          "Fetch LVNs"
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return fetchLvnsForAccount(
+          accountApiKey,
+          accountSecret,
+          retryCount + 1
+        );
+      }
+
       addResponseToHistory(
         { error: err.response?.data?.error || err.message },
         "Fetch LVNs"
       );
     }
-  };
-
-  // Fetch LVNs for selected subaccount with provided secret
-  const handleGetLvns = async () => {
-    await fetchLvnsForAccount(selectedSubaccount, subaccountSecret);
   };
 
   // Transfer LVN from master account to target subaccount
@@ -281,6 +366,7 @@ function App() {
   const handleGetOrCreateApp = async () => {
     setAppInfo(null);
     setResponse(null);
+    setPreviousApp(null);
     setAppLoading(true);
     try {
       const res = await axios.post(`${BACKEND_URL}/api/subaccount-app`, {
@@ -290,6 +376,11 @@ function App() {
         selectedLvn: selectedLvn, // Pass the selected LVN for assignment
       });
       setAppInfo(res.data);
+
+      // Store previous app info if it exists
+      if (res.data.lvnAssignment?.previousApp) {
+        setPreviousApp(res.data.lvnAssignment.previousApp);
+      }
 
       // Mark that the current LVN is now linked to the application
       setLvnLinkedToApp(true);
@@ -395,12 +486,219 @@ function App() {
     }
   }, [selectedLvn, linkedLvn]);
 
+  // Fetch VCR state (all stored apps and private keys)
+  const handleFetchVcrState = async () => {
+    setStateLoading(true);
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/get-vcr-state`, {
+        masterApiKey,
+      });
+      setVcrState(res.data);
+      addResponseToHistory(
+        {
+          success: true,
+          message: "Successfully retrieved VCR state",
+          data: res.data,
+        },
+        "Fetch VCR State"
+      );
+    } catch (err) {
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Fetch VCR State"
+      );
+      setVcrState(null);
+    }
+    setStateLoading(false);
+  };
+
+  // Clear all VCR state
+  const handleClearVcrState = async () => {
+    if (
+      !window.confirm(
+        "Are you sure you want to clear all VCR state? This will remove all stored applications and private keys."
+      )
+    ) {
+      return;
+    }
+
+    setClearingState(true);
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/clear-state`, {
+        masterApiKey,
+      });
+      setVcrState(null);
+      setAppInfo(null);
+      addResponseToHistory(
+        {
+          success: true,
+          message: res.data.message,
+        },
+        "Clear VCR State"
+      );
+    } catch (err) {
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Clear VCR State"
+      );
+    }
+    setClearingState(false);
+  };
+
+  // Fetch all Vonage applications for selected subaccount
+  const handleFetchVonageApps = async () => {
+    if (!selectedSubaccount || !subaccountSecret) {
+      addResponseToHistory(
+        { error: "Please select a subaccount first" },
+        "Fetch Applications"
+      );
+      return;
+    }
+
+    setAppsLoading(true);
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/list-applications`, {
+        masterApiKey,
+        subaccountApiKey: selectedSubaccount,
+        subaccountSecret: subaccountSecret,
+      });
+      const apps = res.data._embedded?.applications || [];
+      setVonageApps(apps);
+      addResponseToHistory(
+        {
+          success: true,
+          message: `Found ${apps.length} Vonage application(s)`,
+          data: apps,
+        },
+        "Fetch Applications"
+      );
+    } catch (err) {
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Fetch Applications"
+      );
+      setVonageApps(null);
+    }
+    setAppsLoading(false);
+  };
+
+  // Delete all Vonage applications for selected subaccount
+  const handleDeleteAllVonageApps = async () => {
+    if (!selectedSubaccount || !subaccountSecret) {
+      addResponseToHistory(
+        { error: "Please select a subaccount first" },
+        "Delete Applications"
+      );
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Are you sure you want to delete ALL Vonage applications for this subaccount? This action cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    setDeletingApps(true);
+    try {
+      const res = await axios.post(
+        `${BACKEND_URL}/api/delete-all-applications`,
+        {
+          masterApiKey,
+          subaccountApiKey: selectedSubaccount,
+          subaccountSecret: subaccountSecret,
+        }
+      );
+      setVonageApps(null);
+      setAppInfo(null);
+      addResponseToHistory(
+        {
+          success: true,
+          message: res.data.message,
+          data: res.data,
+        },
+        "Delete Applications"
+      );
+    } catch (err) {
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Delete Applications"
+      );
+    }
+    setDeletingApps(false);
+  };
+
+  // Link LVN back to previous application
+  const handleLinkBackToPreviousApp = async () => {
+    if (!previousApp) {
+      addResponseToHistory(
+        { error: "No previous app information available" },
+        "Link LVN Back"
+      );
+      return;
+    }
+
+    setLinkingBack(true);
+    try {
+      const res = await axios.post(`${BACKEND_URL}/api/link-lvn-to-app`, {
+        masterApiKey,
+        subaccountApiKey: selectedSubaccount,
+        subaccountSecret: subaccountSecret,
+        msisdn: previousApp.msisdn,
+        applicationId: previousApp.applicationId,
+      });
+
+      setPreviousApp(null);
+      setAppInfo(null);
+      setLvnLinkedToApp(false);
+
+      addResponseToHistory(
+        {
+          success: true,
+          message: res.data.message,
+          data: res.data,
+        },
+        "Link LVN Back"
+      );
+    } catch (err) {
+      addResponseToHistory(
+        { error: err.response?.data?.error || err.message },
+        "Link LVN Back"
+      );
+    }
+    setLinkingBack(false);
+  };
+
+  // Open settings dialog and fetch state
+  const handleOpenSettings = async () => {
+    setSettingsOpen(true);
+    await handleFetchVcrState();
+  };
+
   return (
     <Container maxWidth="sm" sx={{ mt: 4 }}>
       <Paper elevation={3} sx={{ p: 4 }}>
-        <Typography variant="h4" gutterBottom>
-          Vonage Voice LVN Caller
-        </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            mb: 2,
+          }}
+        >
+          <Typography variant="h4">Vonage Voice LVN Caller</Typography>
+          {isAuthenticated && (
+            <IconButton
+              onClick={handleOpenSettings}
+              color="primary"
+              aria-label="settings"
+              size="large"
+            >
+              <SettingsIcon />
+            </IconButton>
+          )}
+        </Box>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {!isAuthenticated ? (
             // Authentication Step
@@ -433,14 +731,22 @@ function App() {
                 <Select
                   value={selectedSubaccount}
                   label="Select Subaccount"
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const newAccount = e.target.value;
                     setSelectedSubaccount(newAccount);
                     // Clear the secret and LVNs when changing subaccount
                     setSubaccountSecret("");
                     setLvns([]);
                     setSelectedLvn("");
+
+                    // Automatically manage secret and fetch LVNs
+                    const secret = await handleManageSecret(newAccount);
+                    if (secret) {
+                      // Fetch LVNs with automatic retry on 401
+                      await fetchLvnsForAccount(newAccount, secret);
+                    }
                   }}
+                  disabled={secretLoading}
                 >
                   {subaccounts.map((subaccount) => (
                     <MenuItem
@@ -453,22 +759,11 @@ function App() {
                 </Select>
               </FormControl>
 
-              <TextField
-                label="Subaccount Secret"
-                value={subaccountSecret}
-                onChange={(e) => setSubaccountSecret(e.target.value)}
-                variant="outlined"
-                autoComplete="off"
-                helperText="Enter the API secret for the selected subaccount"
-              />
-
-              <Button
-                variant="contained"
-                onClick={handleGetLvns}
-                disabled={!selectedSubaccount || !subaccountSecret}
-              >
-                Get Subaccount LVNs
-              </Button>
+              {secretLoading && (
+                <Typography variant="body2" color="primary" sx={{ mt: 1 }}>
+                  Managing subaccount secret...
+                </Typography>
+              )}
 
               <FormControl fullWidth>
                 <InputLabel>LVN</InputLabel>
@@ -549,10 +844,76 @@ function App() {
                   : "Create or Get Subaccount Application"}
               </Button>
 
+              {previousApp && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  ⚠️ LVN {previousApp.msisdn} was unlinked from Application ID:{" "}
+                  {previousApp.applicationId}
+                </Alert>
+              )}
+
               {appInfo && (
                 <Box>
                   <Typography variant="subtitle1">Application ID:</Typography>
                   <pre>{appInfo.applicationId}</pre>
+                </Box>
+              )}
+
+              {/* Link LVN Back to Previous App Section */}
+              {previousApp && (
+                <Box
+                  sx={{
+                    mt: 3,
+                    p: 2,
+                    border: "1px solid #e0e0e0",
+                    borderRadius: 1,
+                  }}
+                >
+                  <Typography
+                    variant="h6"
+                    sx={{ mb: 2, color: "warning.main" }}
+                  >
+                    ↩️ Link LVN Back to Existing App
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ mb: 2, color: "text.secondary" }}
+                  >
+                    Restore the LVN link to the previous application
+                  </Typography>
+                  <Paper
+                    variant="outlined"
+                    sx={{ p: 2, mb: 2, backgroundColor: "#fff3e0" }}
+                  >
+                    <Typography
+                      variant="body2"
+                      sx={{ fontWeight: "bold", mb: 0.5 }}
+                    >
+                      Previous Application
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block" }}
+                    >
+                      App ID: {previousApp.applicationId}
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block" }}
+                    >
+                      LVN: {previousApp.msisdn}
+                    </Typography>
+                  </Paper>
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    onClick={handleLinkBackToPreviousApp}
+                    disabled={linkingBack}
+                    sx={{ width: "100%" }}
+                  >
+                    {linkingBack ? "Linking..." : "Link LVN Back to App"}
+                  </Button>
                 </Box>
               )}
 
@@ -732,6 +1093,266 @@ function App() {
           )}
         </Box>
       </Paper>
+
+      {/* Settings Dialog for VCR State Management */}
+      <Dialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>VCR State Provider Settings</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 1 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Stored Applications and Private Keys
+            </Typography>
+
+            {stateLoading ? (
+              <Typography variant="body2" color="text.secondary">
+                Loading VCR state...
+              </Typography>
+            ) : vcrState ? (
+              <>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  This shows all applications and private keys stored in the VCR
+                  State Provider.
+                </Alert>
+
+                {vcrState.apps && Object.keys(vcrState.apps).length > 0 ? (
+                  <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Stored Applications ({Object.keys(vcrState.apps).length})
+                    </Typography>
+                    <pre
+                      style={{
+                        margin: 0,
+                        fontSize: "0.875rem",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        maxHeight: "300px",
+                        overflowY: "auto",
+                        backgroundColor: "#f5f5f5",
+                        padding: "8px",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      {JSON.stringify(vcrState.apps, null, 2)}
+                    </pre>
+                  </Paper>
+                ) : (
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ mb: 2 }}
+                  >
+                    No applications stored in VCR state.
+                  </Typography>
+                )}
+
+                {vcrState.privateKeys && vcrState.privateKeys.length > 0 ? (
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Stored Private Keys ({vcrState.privateKeys.length})
+                    </Typography>
+                    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                      {vcrState.privateKeys.map((keyName, index) => (
+                        <Chip
+                          key={index}
+                          label={keyName}
+                          size="small"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                  </Paper>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    No private keys stored in VCR state.
+                  </Typography>
+                )}
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No VCR state data available. Click "View All State" to load.
+              </Typography>
+            )}
+
+            <Divider sx={{ my: 3 }} />
+
+            <Typography variant="subtitle1" gutterBottom>
+              Vonage Applications for Selected Subaccount
+            </Typography>
+
+            {!selectedSubaccount ? (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                Please select a subaccount first to view or manage Vonage
+                applications.
+              </Alert>
+            ) : appsLoading ? (
+              <Typography variant="body2" color="text.secondary">
+                Loading Vonage applications...
+              </Typography>
+            ) : vonageApps ? (
+              <>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  These are the actual Vonage applications created in the API
+                  (not just cached in VCR state).
+                </Alert>
+                {vonageApps.length > 0 ? (
+                  <Box sx={{ maxHeight: "400px", overflowY: "auto" }}>
+                    <Typography variant="subtitle2" gutterBottom sx={{ mb: 2 }}>
+                      Found {vonageApps.length} Application
+                      {vonageApps.length > 1 ? "s" : ""}
+                    </Typography>
+                    {vonageApps.map((app, index) => (
+                      <Paper
+                        key={app.id}
+                        variant="outlined"
+                        sx={{ p: 2, mb: 2 }}
+                      >
+                        <Box
+                          sx={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 1,
+                            mb: 1,
+                          }}
+                        >
+                          <Chip
+                            label={`App ${index + 1}`}
+                            size="small"
+                            color="primary"
+                          />
+                          <Typography
+                            variant="body2"
+                            sx={{ fontWeight: "bold" }}
+                          >
+                            {app.name}
+                          </Typography>
+                        </Box>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ display: "block", mb: 0.5 }}
+                        >
+                          ID: {app.id}
+                        </Typography>
+
+                        {app.capabilities?.voice?.webhooks && (
+                          <Box sx={{ mt: 1 }}>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ display: "block" }}
+                            >
+                              Answer URL:{" "}
+                              {
+                                app.capabilities.voice.webhooks.answer_url
+                                  ?.address
+                              }
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ display: "block" }}
+                            >
+                              Event URL:{" "}
+                              {
+                                app.capabilities.voice.webhooks.event_url
+                                  ?.address
+                              }
+                            </Typography>
+                          </Box>
+                        )}
+                        <Accordion sx={{ mt: 1 }}>
+                          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                            <Typography variant="caption">
+                              View Full Details
+                            </Typography>
+                          </AccordionSummary>
+                          <AccordionDetails>
+                            <pre
+                              style={{
+                                margin: 0,
+                                fontSize: "0.75rem",
+                                whiteSpace: "pre-wrap",
+                                wordBreak: "break-word",
+                                backgroundColor: "#f5f5f5",
+                                padding: "8px",
+                                borderRadius: "4px",
+                              }}
+                            >
+                              {JSON.stringify(app, null, 2)}
+                            </pre>
+                          </AccordionDetails>
+                        </Accordion>
+                      </Paper>
+                    ))}
+                  </Box>
+                ) : (
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ mb: 2 }}
+                  >
+                    No Vonage applications found for this subaccount.
+                  </Typography>
+                )}
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Click "View All Apps" to load applications for the selected
+                subaccount.
+              </Typography>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Box
+            sx={{
+              display: "flex",
+              gap: 1,
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
+              width: "100%",
+            }}
+          >
+            <Button
+              onClick={handleFetchVcrState}
+              disabled={stateLoading}
+              variant="outlined"
+            >
+              {stateLoading ? "Loading..." : "View All State"}
+            </Button>
+            <Button
+              onClick={handleClearVcrState}
+              disabled={clearingState}
+              color="error"
+              variant="outlined"
+            >
+              {clearingState ? "Deleting..." : "Delete All State"}
+            </Button>
+            <Button
+              onClick={handleFetchVonageApps}
+              disabled={appsLoading || !selectedSubaccount}
+              variant="outlined"
+              color="primary"
+            >
+              {appsLoading ? "Loading..." : "View All Apps"}
+            </Button>
+            <Button
+              onClick={handleDeleteAllVonageApps}
+              disabled={deletingApps || !selectedSubaccount}
+              color="error"
+              variant="outlined"
+            >
+              {deletingApps ? "Deleting..." : "Delete All Apps"}
+            </Button>
+            <Button onClick={() => setSettingsOpen(false)}>Close</Button>
+          </Box>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
