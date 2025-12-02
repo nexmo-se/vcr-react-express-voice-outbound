@@ -80,12 +80,18 @@ function App() {
   };
 
   // Manage subaccount secret automatically
-  const handleManageSecret = async (subaccountApiKey) => {
+  const handleManageSecret = async (subaccountApiKey, forceRefresh = false) => {
     // Check if we already have a cached secret for this subaccount
-    if (secretCache[subaccountApiKey]) {
+    if (secretCache[subaccountApiKey] && !forceRefresh) {
       console.log(`Using cached secret for subaccount: ${subaccountApiKey}`);
       setSubaccountSecret(secretCache[subaccountApiKey]);
       return secretCache[subaccountApiKey];
+    }
+
+    if (forceRefresh) {
+      console.log(
+        `Force refreshing secret for subaccount: ${subaccountApiKey}`
+      );
     }
 
     setSecretLoading(true);
@@ -261,9 +267,26 @@ function App() {
         );
       }
     } catch (err) {
-      // If 401 error (secret not propagated yet) and we haven't exceeded retry limit
-      if (err.response?.status === 401 && retryCount < 3) {
-        const delay = (retryCount + 1) * 3000; // 3s, 6s, 9s
+      // If 401 error and first attempt, cached secret is stale - refresh it
+      if (err.response?.status === 401 && retryCount === 0) {
+        console.log("401 error - cached secret is invalid, refreshing...");
+        addResponseToHistory(
+          {
+            message: "Cached secret invalid, refreshing and retrying...",
+          },
+          "Fetch LVNs"
+        );
+
+        const freshSecret = await handleManageSecret(accountApiKey, true);
+        if (freshSecret) {
+          console.log("Retrying with fresh secret...");
+          return fetchLvnsForAccount(accountApiKey, freshSecret, 1);
+        }
+      }
+
+      // If 401 error on retry (secret not propagated yet) and haven't exceeded retry limit
+      if (err.response?.status === 401 && retryCount > 0 && retryCount < 3) {
+        const delay = retryCount * 3000; // 3s, 6s
         addResponseToHistory(
           {
             message: `Secret still propagating, retrying in ${

@@ -133,7 +133,7 @@ npm install
    - The backend uses the subaccount's Application ID and Private Key to authenticate and send the outbound call via the Vonage Voice API.
    - All errors (authentication, no LVNs, call errors) and success responses are displayed in the UI.
 
-9. **View Call Status (Webhook Events)**
+8. **View Call Status (Webhook Events)**
    - After a call is initiated, the backend receives real-time call status updates from Vonage via the event webhook.
    - The backend stores the latest status for each call.
    - The frontend polls for status updates and displays them in the UI (e.g., "started", "ringing", "answered", "completed").
@@ -174,7 +174,7 @@ Your backend receives these events at the `/webhooks/event` endpoint, stores the
 
 - **Settings Cog Icon**: Accessible from the top-right corner after authentication
 - **VCR State Viewer**: View all cached application data and private keys stored in VCR State Provider
-- **Vonage Applications Manager**: 
+- **Vonage Applications Manager**:
   - View all Vonage applications for the selected subaccount
   - Display applications in organized cards with app ID, name, and webhook URLs
   - Delete applications matching the naming convention with automatic state cleanup

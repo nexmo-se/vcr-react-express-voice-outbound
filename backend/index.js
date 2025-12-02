@@ -367,6 +367,10 @@ app.post("/api/manage-secret", async (req, res) => {
       console.log(`Successfully created new secret with ID: ${secretId}`);
     }
 
+    // Wait 2 seconds for secret to propagate in Vonage's system
+    console.log("Waiting 2 seconds for secret propagation...");
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
     // Return the secret info to the frontend
     res.json({
       success: true,
