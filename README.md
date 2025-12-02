@@ -68,7 +68,7 @@ npm install
    2. Update in /backend/vcr.yml `FRONTEND_URL` to your VCR Frontend URL. You can deploy frontend twice to retrieve it. There's probably a smarter way to do this.
    3. Then `cd frontend` and `vcr deploy -f vcr-frontend.yml`
 
-## Application Flow (v2)
+## Application Flow
 
 1. **Master Account Authentication**
 
@@ -76,40 +76,22 @@ npm install
    - The app validates the master API key against the configured `MASTER_API_KEY` in the backend environment.
    - If authentication is successful, the app automatically fetches the list of available subaccounts.
 
-2. **Subaccount Selection**
+2. **Subaccount Selection & Automatic Secret Management**
 
    - After successful authentication, the app displays a dropdown list of all available subaccounts (master account excluded).
    - The user selects the desired subaccount from the dropdown.
    - The first subaccount is selected by default.
+   - **Automatic Secret Rotation**: The app automatically manages API secrets for the selected subaccount, rotating them as needed while maintaining a maximum of 2 secrets.
 
-3. **Subaccount Credential Input**
+3. **Fetch LVNs (Owned Numbers)**
 
-   - The user enters the **Subaccount API Secret** in a secure password field.
-   - This credential is required to access the subaccount's LVNs and create applications.
-   - The secret is validated when making API requests.
-
-4. **Fetch LVNs (Owned Numbers)**
-
-   - The user clicks **"Get Subaccount LVNs"** after providing the subaccount secret.
-   - The app uses the **subaccount's own credentials** (API key + secret) to fetch LVNs directly.
+   - The app automatically uses the **subaccount's own credentials** (API key + auto-managed secret) to fetch LVNs.
    - This follows Vonage API best practices for subaccount access.
-   - If valid, available LVNs are fetched and the dropdown is populated. The first LVN is selected by default.
+   - Available LVNs are fetched and the dropdown is populated. The first LVN is selected by default.
+   - **LVN Link Status**: LVNs linked to applications display a "Linked" badge and show the linked Application ID.
    - A success message is displayed showing how many LVNs were found and which numbers are available.
 
-   **Sample Success Response:**
-
-   ```json
-   {
-     "success": true,
-     "message": "Successfully fetched 2 LVNs for this subaccount",
-     "data": {
-       "count": 2,
-       "numbers": ["12089908002", "525588967943"]
-     }
-   }
-   ```
-
-5. **Buy LVN (Optional)**
+4. **Buy LVN (Optional)**
 
    - If a user needs a new phone number, they can click **"BUY LVN"**.
    - The app prompts for a 2-letter country code (e.g., US, GB, DE) to search for available numbers.
@@ -118,14 +100,14 @@ npm install
    - After successful purchase, the LVN list is refreshed and the newly purchased number is automatically selected.
    - **Note**: Purchasing a number will incur monthly charges. The cost will be shown in the response data.
 
-6. **Create or Get Subaccount Application**
+5. **Create or Get Subaccount Application**
 
    - The user clicks **"CREATE OR GET SUBACCOUNT APPLICATION"**.
    - The backend uses the **subaccount's own credentials** to create a new Vonage Application (if one doesn't exist) or retrieve an existing one.
    - The Application ID is displayed in the UI with a message indicating whether it was "Created" or "Retrieved".
    - **Note**: LVN linking is **not required** for outbound calls. The Voice API uses JWT authentication with the application ID and private key.
 
-7. **Make a Call**
+6. **Make a Call**
 
    - The user enters the destination ("To") number and clicks **"Call"**.
    - The app uses the selected LVN as the "from" number and the provided "to" number.
@@ -133,7 +115,7 @@ npm install
    - The backend uses the subaccount's Application ID and Private Key to authenticate and send the outbound call via the Vonage Voice API.
    - All errors (authentication, no LVNs, call errors) and success responses are displayed in the UI.
 
-8. **View Call Status (Webhook Events)**
+7. **View Call Status (Webhook Events)**
    - After a call is initiated, the backend receives real-time call status updates from Vonage via the event webhook.
    - The backend stores the latest status for each call.
    - The frontend polls for status updates and displays them in the UI (e.g., "started", "ringing", "answered", "completed").
@@ -196,28 +178,6 @@ Your backend receives these events at the `/webhooks/event` endpoint, stores the
 - **Automatic State Cleanup**: When deleting Vonage applications, VCR state is automatically cleared
 - **Consistency Enforcement**: Ensures cached state matches actual Vonage resources
 - **No Orphaned Data**: Private keys and application mappings are cleaned up together
-
----
-
-## Version 2 Improvements
-
-### **Security Enhancements**
-
-- **Direct Credential Usage**: Uses subaccount's own API credentials instead of trying to retrieve secrets via master account
-- **Manual Secret Input**: Users must explicitly provide subaccount secrets, improving security awareness
-- **No Credential Storage**: Subaccount secrets are not stored or cached
-
-### **API Compliance**
-
-- **Vonage Best Practices**: Follows official Vonage API documentation for subaccount access
-- **Proper Authentication**: Each subaccount operation uses its own credentials
-- **Error Handling**: Clear feedback when subaccount credentials are invalid
-
-### **User Experience**
-
-- **Explicit Flow**: Users understand exactly which credentials are being used
-- **Manual Control**: LVN fetching requires explicit user action with proper credentials
-- **Clear Validation**: Immediate feedback for authentication issues
 
 ---
 
@@ -304,10 +264,11 @@ The application now automatically detects country codes from phone numbers, elim
   2. Enter target subaccount API key
   3. Click "TRANSFER LVN" to execute transfer (country auto-detected)
 - **Post-Transfer Actions**:
-
   - Number is removed from source subaccount
   - Number appears in target subaccount
-  - Application linking may be required in target subaccount for Voice functionality#### **Transfer Requirements:**
+  - Application linking may be required in target subaccount for Voice functionality
+
+#### **Transfer Requirements:**
 
 - **Master Account Credentials**: Master API key for authentication, secret configured server-side
 - **LVN Selection**: Must select an existing LVN to transfer
@@ -328,16 +289,14 @@ The application now automatically detects country codes from phone numbers, elim
 
 ---
 
-## Implementation Notes (v2)
+## Implementation Notes
 
 - **Master Account Authentication**: The UI requires authentication with the master API key before accessing any functionality.
-- **Subaccount Credential Security**: Users must provide subaccount API secrets manually for secure access to subaccount resources.
+- **Automatic Secret Management**: The app automatically manages subaccount API secrets with rotation, caching, and propagation delay handling.
 - **Direct Subaccount API Access**: All subaccount operations (LVNs, applications, calls) use the subaccount's own credentials following Vonage API best practices.
-- **No Automatic LVN Fetching**: LVNs are fetched only when the user explicitly provides subaccount credentials and clicks "Get Subaccount LVNs".
-- **Credential Validation**: Subaccount credentials are validated during API requests, providing immediate feedback for invalid secrets.
-- **LVN-Application Linking Requirement**: **Critical workflow requirement** - users must click "CREATE OR GET SUBACCOUNT APPLICATION" whenever they select a different LVN to ensure proper assignment before calling.
-- **Call Button Validation**: The Call button is automatically disabled when an LVN is selected that hasn't been linked to the application, with clear warning messages.
-- **Streamlined LVN Management**: Single "BUY LVN" button replaces separate Cancel/Release and Buy buttons, automatically purchasing and assigning numbers.
+- **Automatic LVN Fetching**: LVNs are fetched automatically when selecting a subaccount, with automatic secret refresh on authentication errors.
+- **LVN Link Status Display**: LVNs show their application link status in the dropdown with "Linked" badges and display linked Application IDs.
+- **No LVN Linking Required**: Outbound calls work with any owned LVN - linking is only required for inbound calls/SMS.
 - **Enhanced Response Feedback**: Application creation/retrieval responses clearly indicate whether an app was "Created" or "Retrieved" with specific application IDs.
 - **All errors** (authentication, invalid credentials, no LVNs, call errors) are shown in the UI.
 - **Response History**: The UI maintains a history of the last 10 API responses with timestamps and operation labels. Users can expand the history panel to review previous operations and clear the history if needed.
@@ -345,6 +304,7 @@ The application now automatically detects country codes from phone numbers, elim
 - **LVN selection**: The first available LVN is selected by default after fetching.
 - **Application persistence**: The backend stores subaccount application info and private key for reuse using the VCR State Provider.
 - **Webhook events**: The backend receives and stores call status updates, and the frontend displays them in real time with improved formatting.
+- **Settings Management**: Advanced settings panel accessible via cog icon for viewing/managing VCR state and Vonage applications.
 
 ## VCR State Storage
 
@@ -372,8 +332,6 @@ The application uses Vonage Cloud Runtime (VCR) State Provider to persist critic
   }
   ```
 
-````
-
 #### 2. **Private Keys**
 
 - **Key Pattern:** `"private_key_{applicationId}"`
@@ -388,7 +346,7 @@ The application uses Vonage Cloud Runtime (VCR) State Provider to persist critic
 
 For security and best practice reasons, the following sensitive information is **not** persisted:
 
-- ❌ **Subaccount Secrets** - Must be entered by users each session
+- ❌ **Subaccount Secrets** - Generated and managed automatically, cached in frontend session only
 - ❌ **Master API Key** - Stored only in environment variables and frontend session
 - ❌ **Subaccount Details** - Fetched fresh from Vonage API each time
 - ❌ **Call Status Data** - Temporary webhook data, not persisted long-term
@@ -416,15 +374,3 @@ async function loadPrivateKey(keyName)              // Retrieves private key for
 ```
 
 This architecture ensures secure, efficient management of Vonage Voice applications while maintaining proper separation of sensitive credentials.
-
-## Work History
-
-1. Requires 2 VCR application ID's first for frontend and second for backend.
-2. Created two directories: `backend` and `frontend`.
-3. In the `frontend` directory:
-   - Ran `npx create-react-app .` to create a new ReactJS project in the empty directory.
-   - Ran `vcr init` and created a new app named `vcr-react-frontend`.
-4. In the `backend` directory:
-   - Ran `vcr init` and created a new app named `vcr-react-backend`.
-   - Chose "Starter App" as the VCR application template.
-````
