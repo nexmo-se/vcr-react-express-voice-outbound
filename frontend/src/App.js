@@ -161,6 +161,11 @@ function App() {
     setAuthLoading(false);
   };
 
+  // Helper function to get selected LVN details
+  const getSelectedLvnDetails = () => {
+    return lvns.find((lvn) => lvn.msisdn === selectedLvn);
+  };
+
   // Fetch subaccounts
   const handleGetSubaccounts = async () => {
     setSubaccounts([]);
@@ -748,10 +753,40 @@ function App() {
                   {lvns.map((lvn) => (
                     <MenuItem key={lvn.msisdn} value={lvn.msisdn}>
                       {lvn.msisdn}
+                      {lvn.voiceCallbackType === "app" &&
+                        lvn.voiceCallbackValue && (
+                          <Chip
+                            label="Linked"
+                            size="small"
+                            color="info"
+                            sx={{ ml: 1, height: 20 }}
+                          />
+                        )}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
+
+              {/* Show info message if selected LVN is linked to an app */}
+              {selectedLvn &&
+                getSelectedLvnDetails()?.voiceCallbackType === "app" &&
+                getSelectedLvnDetails()?.voiceCallbackValue && (
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    ℹ️ This LVN is currently linked to Application ID:{" "}
+                    <strong>
+                      {getSelectedLvnDetails()?.voiceCallbackValue}
+                    </strong>
+                    {appInfo &&
+                      getSelectedLvnDetails()?.voiceCallbackValue !==
+                        appInfo.applicationId && (
+                        <>
+                          <br />
+                          Note: You can still make outbound calls - the LVN link
+                          only affects inbound routing.
+                        </>
+                      )}
+                  </Alert>
+                )}
 
               {/* Transfer LVN Section */}
               <Box
