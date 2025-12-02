@@ -63,8 +63,6 @@ function App() {
   const [vonageApps, setVonageApps] = useState(null);
   const [appsLoading, setAppsLoading] = useState(false);
   const [deletingApps, setDeletingApps] = useState(false);
-  const [previousApp, setPreviousApp] = useState(null);
-  const [linkingBack, setLinkingBack] = useState(false);
 
   // Helper function to add response to history and set current response
   const addResponseToHistory = (newResponse, operation = "API Operation") => {
@@ -362,27 +360,20 @@ function App() {
     setPurchaseLoading(false);
   };
 
-  // Create or get subaccount application and assign LVN
+  // Create or get subaccount application (no LVN linking needed)
   const handleGetOrCreateApp = async () => {
     setAppInfo(null);
     setResponse(null);
-    setPreviousApp(null);
     setAppLoading(true);
     try {
       const res = await axios.post(`${BACKEND_URL}/api/subaccount-app`, {
         masterApiKey,
         subaccountApiKey: selectedSubaccount,
         subaccountSecret: subaccountSecret,
-        selectedLvn: selectedLvn, // Pass the selected LVN for assignment
       });
       setAppInfo(res.data);
 
-      // Store previous app info if it exists
-      if (res.data.lvnAssignment?.previousApp) {
-        setPreviousApp(res.data.lvnAssignment.previousApp);
-      }
-
-      // Mark that the current LVN is now linked to the application
+      // LVN linking not required for outbound calls
       setLvnLinkedToApp(true);
       setLinkedLvn(selectedLvn);
 
@@ -629,47 +620,6 @@ function App() {
     setDeletingApps(false);
   };
 
-  // Link LVN back to previous application
-  const handleLinkBackToPreviousApp = async () => {
-    if (!previousApp) {
-      addResponseToHistory(
-        { error: "No previous app information available" },
-        "Link LVN Back"
-      );
-      return;
-    }
-
-    setLinkingBack(true);
-    try {
-      const res = await axios.post(`${BACKEND_URL}/api/link-lvn-to-app`, {
-        masterApiKey,
-        subaccountApiKey: selectedSubaccount,
-        subaccountSecret: subaccountSecret,
-        msisdn: previousApp.msisdn,
-        applicationId: previousApp.applicationId,
-      });
-
-      setPreviousApp(null);
-      setAppInfo(null);
-      setLvnLinkedToApp(false);
-
-      addResponseToHistory(
-        {
-          success: true,
-          message: res.data.message,
-          data: res.data,
-        },
-        "Link LVN Back"
-      );
-    } catch (err) {
-      addResponseToHistory(
-        { error: err.response?.data?.error || err.message },
-        "Link LVN Back"
-      );
-    }
-    setLinkingBack(false);
-  };
-
   // Open settings dialog and fetch state
   const handleOpenSettings = async () => {
     setSettingsOpen(true);
@@ -844,76 +794,10 @@ function App() {
                   : "Create or Get Subaccount Application"}
               </Button>
 
-              {previousApp && (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                  ⚠️ LVN {previousApp.msisdn} was unlinked from Application ID:{" "}
-                  {previousApp.applicationId}
-                </Alert>
-              )}
-
               {appInfo && (
                 <Box>
                   <Typography variant="subtitle1">Application ID:</Typography>
                   <pre>{appInfo.applicationId}</pre>
-                </Box>
-              )}
-
-              {/* Link LVN Back to Previous App Section */}
-              {previousApp && (
-                <Box
-                  sx={{
-                    mt: 3,
-                    p: 2,
-                    border: "1px solid #e0e0e0",
-                    borderRadius: 1,
-                  }}
-                >
-                  <Typography
-                    variant="h6"
-                    sx={{ mb: 2, color: "warning.main" }}
-                  >
-                    ↩️ Link LVN Back to Existing App
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    sx={{ mb: 2, color: "text.secondary" }}
-                  >
-                    Restore the LVN link to the previous application
-                  </Typography>
-                  <Paper
-                    variant="outlined"
-                    sx={{ p: 2, mb: 2, backgroundColor: "#fff3e0" }}
-                  >
-                    <Typography
-                      variant="body2"
-                      sx={{ fontWeight: "bold", mb: 0.5 }}
-                    >
-                      Previous Application
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block" }}
-                    >
-                      App ID: {previousApp.applicationId}
-                    </Typography>
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block" }}
-                    >
-                      LVN: {previousApp.msisdn}
-                    </Typography>
-                  </Paper>
-                  <Button
-                    variant="outlined"
-                    color="warning"
-                    onClick={handleLinkBackToPreviousApp}
-                    disabled={linkingBack}
-                    sx={{ width: "100%" }}
-                  >
-                    {linkingBack ? "Linking..." : "Link LVN Back to App"}
-                  </Button>
                 </Box>
               )}
 

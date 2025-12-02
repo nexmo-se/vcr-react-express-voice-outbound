@@ -645,99 +645,13 @@ app.post("/api/subaccount-app", async (req, res) => {
     }
   }
 
-  // LVN Assignment Logic (for both existing and new applications)
-  let lvnAssignmentResult = null;
-  let previousAppInfo = null;
-
-  if (selectedLvn) {
-    try {
-      // First, check if LVN is already linked to another app
-      const basicAuth = Buffer.from(
-        `${subaccountApiKey}:${subaccountSecret}`
-      ).toString("base64");
-
-      const lvnResponse = await axios.get(
-        "https://rest.nexmo.com/account/numbers",
-        {
-          headers: { Authorization: `Basic ${basicAuth}` },
-        }
-      );
-
-      const numbers = lvnResponse.data.numbers || [];
-      const currentLvnDetails = numbers.find(
-        (num) => num.msisdn === selectedLvn
-      );
-
-      // Store previous app info if it exists and is different
-      if (
-        currentLvnDetails &&
-        currentLvnDetails.voiceCallbackType === "app" &&
-        currentLvnDetails.voiceCallbackValue &&
-        currentLvnDetails.voiceCallbackValue !== appInfo.applicationId
-      ) {
-        previousAppInfo = {
-          applicationId: currentLvnDetails.voiceCallbackValue,
-          msisdn: selectedLvn,
-        };
-        console.log(
-          `LVN ${selectedLvn} is currently linked to app ${previousAppInfo.applicationId}`
-        );
-      }
-
-      console.log(
-        `Assigning LVN ${selectedLvn} to application ${appInfo.applicationId}`
-      );
-
-      // Detect country code from the LVN
-      const detectedCountry = detectCountryFromLvn(selectedLvn);
-      console.log(
-        `Detected country for LVN ${selectedLvn}: ${detectedCountry}`
-      );
-
-      // Use subaccount credentials via URL parameters (not Basic Auth header)
-      const assignFormData = new URLSearchParams();
-      assignFormData.append("country", detectedCountry);
-      assignFormData.append("msisdn", selectedLvn);
-      assignFormData.append("app_id", appInfo.applicationId);
-
-      const assignResponse = await axios.post(
-        `https://rest.nexmo.com/number/update?api_key=${subaccountApiKey}&api_secret=${subaccountSecret}`,
-        assignFormData,
-        {
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-        }
-      );
-
-      console.log("LVN assigned successfully:", assignResponse.data);
-      lvnAssignmentResult = {
-        success: true,
-        message: `LVN ${selectedLvn} assigned to application`,
-        data: assignResponse.data,
-        previousApp: previousAppInfo,
-      };
-    } catch (assignErr) {
-      console.error(
-        "Error assigning LVN to app:",
-        assignErr.response?.data || assignErr.message
-      );
-      lvnAssignmentResult = {
-        success: false,
-        error: "Failed to assign LVN to application",
-        details: assignErr.response?.data || assignErr.message,
-      };
-    }
-  }
-
-  // Prepare final response
+  // Prepare final response (no LVN linking needed for outbound calls)
   const finalAppInfo = {
     ...appInfo,
-    lvnAssignment: lvnAssignmentResult,
     action: isExistingApp ? "retrieved" : "created",
     message: isExistingApp
       ? `Retrieved existing Voice API application: ${appInfo.applicationId}`
-      : `Created new Voice API application: ${appInfo.applicationId}`,
+      : `Created new Voice API application: ${appInfo.applicationId}. Note: LVN linking not required for outbound calls.`,
   };
 
   // Update stored apps with the latest info

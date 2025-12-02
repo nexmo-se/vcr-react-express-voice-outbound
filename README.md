@@ -10,9 +10,8 @@ This app demonstrates how to use the Vonage API to make outbound voice calls fro
 - **LVN Management**: Fetch LVNs using subaccount's own credentials (following Vonage API best practices).
 - **Dual LVN Operations UI**: Separate sections for Release and Transfer operations with clear visual distinction.
 - **LVN Transfer Section**: Transfer LVNs from master account to target subaccounts using Vonage Subaccounts Transfer API.
-- **Voice Application Management**: Create Vonage Voice Applications using subaccount credentials with automatic LVN linking.
-- **LVN Re-linking Detection**: Automatically detects when an LVN is linked to an existing app and provides rollback capability.
-- **Outbound Calling**: Make outbound calls using the selected LVN as the caller ID.
+- **Voice Application Management**: Create Vonage Voice Applications using subaccount credentials (LVN linking not required for outbound calls).
+- **Outbound Calling**: Make outbound calls using any LVN as the caller ID - no explicit linking needed.
 - **Real-time Call Status**: View real-time call status updates in the UI (via webhook events).
 - **Response History**: Track and review previous API responses with collapsible history panel.
 - **Settings Management**: Advanced settings panel for viewing and managing VCR state and Vonage applications.
@@ -119,28 +118,18 @@ npm install
    - After successful purchase, the LVN list is refreshed and the newly purchased number is automatically selected.
    - **Note**: Purchasing a number will incur monthly charges. The cost will be shown in the response data.
 
-6. **Create or Get Subaccount Application and LVN Assignment**
+6. **Create or Get Subaccount Application**
 
    - The user clicks **"CREATE OR GET SUBACCOUNT APPLICATION"**.
    - The backend uses the **subaccount's own credentials** to create a new Vonage Application (if one doesn't exist) or retrieve an existing one.
-   - **Critical Requirement**: The selected LVN is automatically assigned to the application during this process.
    - The Application ID is displayed in the UI with a message indicating whether it was "Created" or "Retrieved".
-   - **LVN Linking**: This step links the currently selected LVN to the Voice application, enabling it for outbound calling.
+   - **Note**: LVN linking is **not required** for outbound calls. The Voice API uses JWT authentication with the application ID and private key.
 
-7. **LVN Selection Workflow**
-
-   - **Initial Selection**: After selecting an LVN and creating/getting the application, calls can be made normally.
-   - **Changing LVN**: If a user selects a different LVN from the dropdown:
-     - The **Call button becomes disabled** ⚠️
-     - A warning message appears: "You selected a different LVN. Click 'CREATE OR GET SUBACCOUNT APPLICATION' to link this LVN before making calls."
-     - The user **must** click "CREATE OR GET SUBACCOUNT APPLICATION" again to link the new LVN.
-     - This ensures every LVN is properly assigned to the application before calling.
-
-8. **Make a Call**
+7. **Make a Call**
 
    - The user enters the destination ("To") number and clicks **"Call"**.
-   - **Prerequisite**: The selected LVN must be linked to the application (see step 7).
    - The app uses the selected LVN as the "from" number and the provided "to" number.
+   - Any LVN owned by the subaccount can be used - no explicit linking required.
    - The backend uses the subaccount's Application ID and Private Key to authenticate and send the outbound call via the Vonage Voice API.
    - All errors (authentication, no LVNs, call errors) and success responses are displayed in the UI.
 
@@ -202,16 +191,6 @@ Your backend receives these events at the `/webhooks/event` endpoint, stores the
 - **Secret Caching**: Caches secrets per subaccount to avoid unnecessary rotation
 - **Seamless UX**: Users no longer need to manually enter subaccount secrets
 
-### **LVN Re-linking Intelligence**
-
-- **Previous App Detection**: Detects when an LVN is already linked to another application
-- **Warning Alerts**: Displays clear warning showing which app was unlinked
-- **Link Back Functionality**: 
-  - New "Link LVN Back to Existing App" section appears when re-linking occurs
-  - Shows previous application ID and LVN details
-  - One-click restoration to previous app with "Link LVN Back to App" button
-- **Transparency**: Full visibility into LVN-to-app relationships and changes
-
 ### **Synchronized State Management**
 
 - **Automatic State Cleanup**: When deleting Vonage applications, VCR state is automatically cleared
@@ -242,33 +221,24 @@ Your backend receives these events at the `/webhooks/event` endpoint, stores the
 
 ---
 
-## New Workflow Requirements (v2.1)
+## Important Notes
 
-### **LVN-Application Linking Enforcement**
+### **Outbound Calls Don't Require LVN Linking**
 
-The application now enforces a critical workflow requirement: **every LVN must be explicitly linked to the Voice application before making calls**.
+**Key Insight**: LVN-to-application linking is **not required** for outbound calls via the Voice API.
 
-#### **Key Behaviors:**
+#### **Why:**
 
-1. **Initial Flow**: Select LVN → Create/Get App → LVN automatically linked → Call enabled ✅
-2. **LVN Change Flow**:
-   - Select different LVN → **Call button disabled** ❌
-   - Warning displayed: "⚠️ You selected a different LVN. Click 'CREATE OR GET SUBACCOUNT APPLICATION' to link this LVN before making calls."
-   - User must click "CREATE OR GET SUBACCOUNT APPLICATION" → LVN re-linked → Call enabled ✅
+- **JWT Authentication**: The Voice API authenticates outbound calls using JWT tokens generated from the application ID and private key
+- **Any LVN Works**: You can use any LVN owned by the subaccount as the caller ID without explicit linking
+- **Linking Only for Inbound**: LVN-to-app linking is primarily required for receiving inbound calls and SMS
 
-#### **Technical Implementation:**
+#### **What This Means:**
 
-- **One Application Per Subaccount**: Each subaccount uses a single Voice application for all its LVNs
-- **Individual LVN Assignment**: Each LVN is individually assigned to the application using Vonage's `/number/update` API
-- **State Tracking**: Frontend tracks which LVN is currently linked and validates before enabling calls
-- **Automatic Re-assignment**: When different LVN selected, clicking "CREATE OR GET SUBACCOUNT APPLICATION" assigns the new LVN to the existing application
-
-#### **Benefits:**
-
-- **Prevents Call Failures**: Ensures LVNs are properly configured before attempting calls
-- **Clear User Guidance**: Explicit workflow prevents user confusion
-- **API Compliance**: Follows Vonage best practices for number-to-application assignment
-- **Flexible Management**: Users can switch between LVNs while maintaining proper configuration
+- **Simplified Workflow**: Select LVN → Create/Get App → Call immediately ✅
+- **No Re-linking Needed**: Switch between LVNs freely without additional configuration
+- **Fewer API Calls**: No need to call `/number/update` for outbound-only use cases
+- **Reduced Errors**: Eliminates authentication issues with number update API
 
 ### **Dual LVN Operations UI (v2.3)**
 
